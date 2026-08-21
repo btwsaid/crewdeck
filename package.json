@@ -1,0 +1,44 @@
+{
+  "name": "crewdeck",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-only night-watch dashboard for Firstmate fleets",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "NEXT_TELEMETRY_DISABLED=1 CREWDECK_DEMO=${CREWDECK_DEMO:-1} NODE_ENV=development node server.mjs",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production node server.mjs",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "screenshots": "node scripts/capture-screenshots.mjs",
+    "check": "npm run format && npm run lint && npm run typecheck && npm test && npm run build && npm run test:e2e"
+  },
+  "dependencies": {
+    "next": "16.3.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "22.19.11",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.3",
+    "eslint-config-next": "16.3.1",
+    "jsdom": "28.1.0",
+    "prettier": "3.8.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}
