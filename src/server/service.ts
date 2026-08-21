@@ -50,6 +50,7 @@ export class CrewdeckService {
   private readonly config: CrewdeckConfig;
   private readonly registry: AccountRegistry;
   private started = false;
+  private startPromise: Promise<void> | null = null;
   private fleet: FleetSnapshot;
   private quota: QuotaSnapshot;
   private accounts: AccountsSnapshot;
@@ -84,15 +85,12 @@ export class CrewdeckService {
 
   async ensureStarted(): Promise<void> {
     if (this.started) return;
-    this.started = true;
-    if (this.config.demo) {
-      this.refreshDemo();
-    } else {
-      await Promise.all([this.refreshFleet(), this.refreshQuota()]);
+    this.startPromise ??= this.start();
+    try {
+      await this.startPromise;
+    } finally {
+      if (!this.started) this.startPromise = null;
     }
-    this.heartbeatTimer = setInterval(() => {
-      this.emit({ type: "heartbeat", data: { generatedAt: Date.now() } });
-    }, heartbeatMs);
   }
 
   snapshots(): {
@@ -107,8 +105,15 @@ export class CrewdeckService {
   }
 
   subscribe(listener: (event: StreamEvent) => void): () => void {
-    this.emitter.on("event", listener);
-    return () => this.emitter.off("event", listener);
+    const guardedListener = (event: StreamEvent) => {
+      try {
+        listener(event);
+      } catch {
+        this.emitter.off("event", guardedListener);
+      }
+    };
+    this.emitter.on("event", guardedListener);
+    return () => this.emitter.off("event", guardedListener);
   }
 
   async setScenario(value: unknown): Promise<DemoScenario> {
@@ -215,10 +220,27 @@ export class CrewdeckService {
     if (this.fleetTimer) clearTimeout(this.fleetTimer);
     if (this.quotaTimer) clearTimeout(this.quotaTimer);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.heartbeatTimer = null;
+    this.fleetTimer = null;
+    this.quotaTimer = null;
+    this.debounceTimer = null;
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
     this.emitter.removeAllListeners();
     this.started = false;
+    this.startPromise = null;
+  }
+
+  private async start(): Promise<void> {
+    if (this.config.demo) {
+      this.refreshDemo();
+    } else {
+      await Promise.all([this.refreshFleet(), this.refreshQuota()]);
+    }
+    this.heartbeatTimer = setInterval(() => {
+      this.emit({ type: "heartbeat", data: { generatedAt: Date.now() } });
+    }, heartbeatMs);
+    this.started = true;
   }
 
   private refreshDemo(): void {
@@ -275,8 +297,12 @@ export class CrewdeckService {
       );
       const raw = JSON.parse(result.stdout) as unknown;
       const { enrichment, homes } = await this.readEnrichment(raw);
-      const next = mapFleetPayload(raw, enrichment);
-      this.fleet = this.retainUnreachableWorkers(next, this.fleet);
+      const next = this.retainUnreachableWorkers(
+        mapFleetPayload(raw, enrichment),
+        this.fleet,
+      );
+      assertCleanPayload(next);
+      this.fleet = next;
       this.resetWatchers(homes);
     } catch {
       this.fleet = fleetExecutionError(
@@ -305,7 +331,9 @@ export class CrewdeckService {
           timeoutMs: 20_000,
         },
       );
-      this.quota = parseQuotaPayload(JSON.parse(result.stdout) as unknown);
+      const next = parseQuotaPayload(JSON.parse(result.stdout) as unknown);
+      assertCleanPayload(next);
+      this.quota = next;
     } catch {
       this.quota = quotaExecutionError("quota-axi --json failed");
     } finally {

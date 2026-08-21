@@ -1,0 +1,133 @@
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { CrewdeckConfig } from "@/server/config";
+
+interface FleetState {
+  revision: number;
+  fail: boolean;
+}
+
+interface QuotaState {
+  percentRemaining: number;
+}
+
+export interface SyntheticLiveFixture {
+  config: CrewdeckConfig;
+  writeFleetState(state: FleetState): Promise<void>;
+  writeQuotaState(state: QuotaState): Promise<void>;
+}
+
+export async function createSyntheticLiveFixture(): Promise<SyntheticLiveFixture> {
+  const directory = await mkdtemp(join(tmpdir(), "crewdeck-live-fixture-"));
+  const home = join(directory, "firstmate-home");
+  const stateDirectory = join(home, "state");
+  const commandDirectory = join(directory, "commands");
+  const fleetState = join(directory, "fleet-state.json");
+  const quotaState = join(directory, "quota-state.json");
+  const fleetCommand = join(commandDirectory, "fleet.mjs");
+  const quotaCommand = join(commandDirectory, "quota.mjs");
+  await Promise.all([
+    mkdir(stateDirectory, { recursive: true }),
+    mkdir(commandDirectory, { recursive: true }),
+  ]);
+
+  const writeFleetState = async (state: FleetState) => {
+    await writeFile(fleetState, JSON.stringify(state));
+  };
+  const writeQuotaState = async (state: QuotaState) => {
+    await writeFile(quotaState, JSON.stringify(state));
+  };
+  await Promise.all([
+    writeFleetState({ revision: 1, fail: false }),
+    writeQuotaState({ percentRemaining: 71 }),
+    writeFile(
+      join(stateDirectory, "synthetic-live-worker.meta"),
+      [
+        `project=${["", "private", "synthetic-home", "synthetic-project"].join("/")}`,
+        "kind=ship",
+        "harness=pi",
+        "model=synthetic-model",
+        "effort=xhigh",
+      ].join("\n"),
+    ),
+  ]);
+
+  await Promise.all([
+    writeFile(
+      fleetCommand,
+      `#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+if (process.argv[2] !== "--json") process.exit(64);
+const state = JSON.parse(readFileSync(${JSON.stringify(fleetState)}, "utf8"));
+if (state.fail) process.exit(1);
+const generated = new Date().toISOString();
+console.log(JSON.stringify({
+  schema: "fm-fleet-snapshot.v1",
+  generated,
+  tasks: [{
+    id: "synthetic-live-worker",
+    kind: "ship",
+    harness: "pi",
+    project: "synthetic-project",
+    current_state: {
+      state: "working",
+      detail: \`synthetic live update \${state.revision}\`,
+      observed_at: generated,
+    },
+    hints: { open_decisions: [] },
+    paths: { status_log: { last_event: {
+      state: "working",
+      note: \`synthetic fixture revision \${state.revision}\`,
+    } } },
+  }],
+  secondmate_current: { records: [] },
+}));
+`,
+      { mode: 0o755 },
+    ),
+    writeFile(
+      quotaCommand,
+      `#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+if (process.argv[2] !== "--json") process.exit(64);
+const state = JSON.parse(readFileSync(${JSON.stringify(quotaState)}, "utf8"));
+const generatedAt = new Date().toISOString();
+console.log(JSON.stringify({
+  schemaVersion: 3,
+  generatedAt,
+  providers: [{
+    provider: "synthetic-provider",
+    label: "Synthetic Provider",
+    plan: "test",
+    source: "synthetic-fixture",
+    state: { status: "fresh", stale: false, refreshedAt: generatedAt },
+    windows: [{
+      id: "synthetic_window",
+      label: "Synthetic window",
+      kind: "rolling",
+      percentRemaining: state.percentRemaining,
+      resetsAt: null,
+      windowSeconds: 3600,
+      pace: { status: "unknown" },
+    }],
+  }],
+}));
+`,
+      { mode: 0o755 },
+    ),
+  ]);
+  await Promise.all([chmod(fleetCommand, 0o755), chmod(quotaCommand, 0o755)]);
+
+  return {
+    config: {
+      demo: false,
+      fmHome: home,
+      fleetCommand,
+      quotaCommand,
+      accountsFile: join(directory, "accounts.json"),
+    },
+    writeFleetState,
+    writeQuotaState,
+  };
+}
