@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { comparableWindows } from "@/server/accounts";
-import type { AccountView, QuotaWindow } from "@/server/contracts";
+import { buildAccountsSnapshot, comparableWindows } from "@/server/accounts";
+import type {
+  AccountView,
+  ProviderQuota,
+  QuotaSnapshot,
+  QuotaWindow,
+} from "@/server/contracts";
 
 function window(id: string, percentage: number): QuotaWindow {
   return {
@@ -42,6 +47,48 @@ describe("multi-account comparability", () => {
       best: [{ id: "week", label: "week", percentRemaining: 80, alias: "b" }],
     });
   });
+  it("does not assign provider totals across registered accounts", () => {
+    const providerTotal: ProviderQuota = {
+      provider: "claude",
+      label: "Claude",
+      accountAlias: null,
+      plan: "synthetic",
+      sourceKind: "oauth",
+      state: { status: "fresh", refreshedAt: 1 },
+      windows: [window("five_hour", 73), window("seven_day", 61)],
+      reason: null,
+      limitingWindowIds: ["seven_day"],
+      relationship: "unknown",
+    };
+    const quota: QuotaSnapshot = {
+      generatedAt: 1,
+      schemaVersion: 3,
+      source: { status: "live", refreshedAt: 1, reason: null },
+      providers: [providerTotal],
+    };
+    const result = buildAccountsSnapshot(
+      [
+        { alias: "flagship", sourceId: "claude:oauth-profile:····a4f2" },
+        { alias: "reserve", sourceId: "claude:oauth-profile:····c81d" },
+      ],
+      quota,
+      [],
+      "stable profile identifiers unavailable",
+      2,
+    );
+    expect(result.accounts).toHaveLength(2);
+    expect(
+      result.accounts.map((registration) => ({
+        alias: registration.alias,
+        state: registration.state.status,
+        windows: registration.windows,
+      })),
+    ).toEqual([
+      { alias: "flagship", state: "unavailable", windows: [] },
+      { alias: "reserve", state: "unavailable", windows: [] },
+    ]);
+  });
+
   it("refuses to merge unlike window sets", () => {
     expect(
       comparableWindows([

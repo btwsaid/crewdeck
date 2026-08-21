@@ -73,6 +73,7 @@ export type QuotaState =
   | "stale"
   | "unavailable"
   | "auth_required"
+  | "rate_limited"
   | "error"
   | "unsupported";
 

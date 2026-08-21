@@ -138,6 +138,7 @@ function AccountCard({
 }) {
   const unavailable = [
     "auth_required",
+    "rate_limited",
     "error",
     "unsupported",
     "unavailable",
