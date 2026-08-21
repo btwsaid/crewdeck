@@ -6,7 +6,7 @@ All repository fixtures are invented. Synthetic mode is the default for developm
 
 - `tests/unit`: metadata/status/quota parsers, runtime/model separation, hostile allowlist mapping, elapsed semantics, account registry shape and file mode, comparable account windows, and Host/Forwarded/Origin enforcement.
 - `tests/integration`: fixed `--json` argv, timeout/output limits, discarded diagnostics, malformed and hostile Firstmate snapshots, primary plus second-mate grouping, stale retention/recovery, partial providers, live stream heartbeat/reconnect and refresh behavior, account mutations, and no snapshot persistence.
-- `tests/e2e`: live night watch, blocker ordering, critical quota, source failure, stale recovery, actual and filtered empty states, add/detect/rename/disconnect, comparable and incomparable windows, keyboard/focus restoration, responsive desktop/mobile, reduced motion, loopback requests, and clean browser payloads.
+- `tests/e2e`: live night watch, blocker ordering, critical quota, source failure, stale recovery, actual and filtered empty states, add/detect/rename/disconnect, comparable and incomparable windows, keyboard/focus restoration, responsive desktop/mobile, reduced motion, loopback requests, clean browser payloads, and a production live-mode browser path driven by synthetic current-schema Claude, Fable, and Codex windows on an isolated loopback port.
 
 Run the complete gate:
 

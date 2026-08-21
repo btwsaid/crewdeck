@@ -35,6 +35,8 @@ function quotaState(value: unknown, stale: unknown): QuotaState {
       return "stale";
     case "auth_required":
       return "auth_required";
+    case "rate_limited":
+      return "rate_limited";
     case "unsupported":
       return "unsupported";
     case "unavailable":
@@ -89,6 +91,7 @@ function errorReason(
     stale: "last authoritative values are stale",
     unavailable: "authoritative local quota source is unavailable",
     auth_required: "authentication required in the official provider CLI",
+    rate_limited: "authoritative local quota source is rate limited",
     error: "authoritative local quota source returned an error",
     unsupported: "quota source is unsupported",
   };
@@ -108,16 +111,29 @@ function mapProvider(value: unknown): ProviderQuota | null {
         .map(mapWindow)
         .filter((window): window is QuotaWindow => window !== null)
     : [];
-  const limitingWindowIds = Array.isArray(value.effective)
-    ? value.effective
+  const quotaSemantics = isRecord(value.quotaSemantics)
+    ? value.quotaSemantics
+    : {};
+  const effectiveAvailability = Array.isArray(
+    quotaSemantics.effectiveAvailability,
+  )
+    ? quotaSemantics.effectiveAvailability
+    : Array.isArray(value.effective)
+      ? value.effective
+      : [];
+  const reportedWindowIds = new Set(windows.map((window) => window.id));
+  const limitingWindowIds = [
+    ...new Set(
+      effectiveAvailability
         .flatMap((entry) =>
           isRecord(entry) && Array.isArray(entry.limitingWindowIds)
             ? entry.limitingWindowIds
             : [],
         )
         .map((id) => safeIdentifier(id, ""))
-        .filter(Boolean)
-    : [];
+        .filter((id) => id && reportedWindowIds.has(id)),
+    ),
+  ];
   return {
     provider,
     label: safeDisplayToken(value.label, provider, 50),

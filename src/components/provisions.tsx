@@ -82,6 +82,7 @@ function GaugeWindowCard({
           pace source: {window.pace.burnMultiple.toFixed(1)}× burn multiple
         </div>
       )}
+      {provider.reason && <div className="gauge-why">{provider.reason}</div>}
       {limiting && (
         <div className="gauge-limit-note">
           <b>limiting window</b> — authoritative source marks this window as
@@ -90,6 +91,48 @@ function GaugeWindowCard({
       )}
     </article>
   );
+}
+
+function MissingWindowCard({
+  provider,
+  label,
+}: {
+  provider: ProviderQuota;
+  label: string;
+}) {
+  return (
+    <article className="gauge-card unavailable">
+      <div className="gauge-head">
+        <span className="gauge-provider">{provider.label}</span>
+        <span className="gauge-window">{label}</span>
+        <span className="gauge-remaining" aria-hidden="true">
+          ?
+        </span>
+      </div>
+      <div
+        className="gauge-track unknown hatch"
+        role="img"
+        aria-label={`${provider.label} ${label} not reported`}
+      />
+      <div className="gauge-why">
+        Authoritative source omitted this window; no usage or reset value was
+        inferred.
+      </div>
+      <div className="gauge-foot">
+        <span className="gauge-state">missing · no data</span>
+      </div>
+    </article>
+  );
+}
+
+function missingClaudeWindows(provider: ProviderQuota) {
+  if (provider.provider !== "claude" || provider.windows.length === 0)
+    return [];
+  const reported = new Set(provider.windows.map((window) => window.id));
+  return [
+    { id: "five_hour", label: "5-hour session" },
+    { id: "seven_day", label: "week" },
+  ].filter((window) => !reported.has(window.id));
 }
 
 function UnavailableProvider({ provider }: { provider: ProviderQuota }) {
@@ -108,6 +151,10 @@ function UnavailableProvider({ provider }: { provider: ProviderQuota }) {
       />
       <div className="gauge-why">
         {provider.reason ?? "authoritative window not reported"}
+      </div>
+      <div className="gauge-why">
+        Authoritative source supplied no quota windows; Crewdeck inferred no
+        usage or reset values.
       </div>
       <div className="gauge-foot">
         <span className="gauge-state">{provider.state.status} · no data</span>
@@ -163,15 +210,23 @@ export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
       ) : (
         <div className="provisions">
           {quota.providers.flatMap((provider) =>
-            provider.windows.length > 0 &&
-            ["fresh", "stale"].includes(provider.state.status)
-              ? provider.windows.map((window) => (
-                  <GaugeWindowCard
-                    provider={provider}
-                    window={window}
-                    key={`${provider.provider}:${provider.accountAlias ?? "none"}:${window.id}`}
-                  />
-                ))
+            provider.windows.length > 0
+              ? [
+                  ...provider.windows.map((window) => (
+                    <GaugeWindowCard
+                      provider={provider}
+                      window={window}
+                      key={`${provider.provider}:${provider.accountAlias ?? "none"}:${window.id}`}
+                    />
+                  )),
+                  ...missingClaudeWindows(provider).map((window) => (
+                    <MissingWindowCard
+                      provider={provider}
+                      label={window.label}
+                      key={`${provider.provider}:missing:${window.id}`}
+                    />
+                  )),
+                ]
               : [
                   <UnavailableProvider
                     provider={provider}

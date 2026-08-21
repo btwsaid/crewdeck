@@ -45,6 +45,19 @@ const base = {
           pace: { status: "ahead" },
         },
       ],
+      quotaSemantics: {
+        status: "known",
+        effectiveAvailability: [
+          {
+            scope: "all_models",
+            limitingWindowIds: ["seven_day", "not_a_reported_window"],
+          },
+          {
+            scope: "model:fable",
+            limitingWindowIds: ["seven_day"],
+          },
+        ],
+      },
       accounts: [{ email: ["private", "example.invalid"].join("@") }],
       futureField: "excluded",
     },
@@ -62,7 +75,13 @@ describe("quota schema v3", () => {
       "model:fable",
     ]);
     expect(result.providers[0].windows[1].percentRemaining).toBeNull();
-    expect(result.providers[0].windows[0].pace.status).toBe("behind");
+    expect(result.providers[0].windows[0]).toMatchObject({
+      percentRemaining: 12,
+      resetsAt: Date.parse("2035-01-01T01:00:00.000Z"),
+      windowSeconds: 18_000,
+      pace: { status: "behind", burnMultiple: 1.4 },
+    });
+    expect(result.providers[0].limitingWindowIds).toEqual(["seven_day"]);
     expect(() => assertCleanPayload(result)).not.toThrow();
     expect(JSON.stringify(result)).not.toContain("accounts");
   });
@@ -83,7 +102,18 @@ describe("quota schema v3", () => {
     expect(window.resetsAt).toBeNull();
   });
 
-  it("preserves exact partial and auth-required states", () => {
+  it("keeps missing Claude windows missing and optional Fable absent", () => {
+    const partial = structuredClone(base);
+    partial.providers[0].windows = [partial.providers[0].windows[0]];
+    partial.providers[0].state.status = "stale";
+    partial.providers[0].state.stale = true;
+    const provider = parseQuotaPayload(partial).providers[0];
+    expect(provider.state.status).toBe("stale");
+    expect(provider.windows.map((window) => window.id)).toEqual(["five_hour"]);
+    expect(provider.limitingWindowIds).toEqual([]);
+  });
+
+  it("preserves exact partial and provider failure states", () => {
     const payload: unknown = {
       ...structuredClone(base),
       providers: [
@@ -93,7 +123,7 @@ describe("quota schema v3", () => {
           label: "Codex",
           plan: null,
           source: "unavailable",
-          state: { status: "auth_required", stale: false, refreshedAt: null },
+          state: { status: "rate_limited", stale: false, refreshedAt: null },
           windows: [],
           accounts: [],
           futureField: "excluded",
@@ -102,7 +132,21 @@ describe("quota schema v3", () => {
     };
     const result = parseQuotaPayload(payload);
     expect(result.source.status).toBe("partial");
-    expect(result.providers[1].state.status).toBe("auth_required");
-    expect(result.providers[1].reason).toMatch(/official provider CLI/u);
+    expect(result.providers[1].state.status).toBe("rate_limited");
+    expect(result.providers[1].reason).toMatch(/rate limited/u);
+  });
+
+  it("keeps a provider with no authoritative evidence explicit", () => {
+    const payload = structuredClone(base);
+    payload.providers[0].state.status = "auth_required";
+    payload.providers[0].state.stale = false;
+    payload.providers[0].windows = [];
+    const provider = parseQuotaPayload(payload).providers[0];
+    expect(provider).toMatchObject({
+      provider: "claude",
+      state: { status: "auth_required" },
+      windows: [],
+    });
+    expect(provider.reason).toMatch(/official provider CLI/u);
   });
 });

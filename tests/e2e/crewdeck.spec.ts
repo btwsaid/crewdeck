@@ -1,4 +1,50 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:net";
 import { expect, test, type Page } from "@playwright/test";
+import { createSyntheticLiveFixture } from "../integration/live-fixture";
+
+async function isolatedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string")
+    throw new Error("could not reserve a loopback test port");
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
+  return address.port;
+}
+
+async function waitForLiveServer(url: string, child: ChildProcess) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null)
+      throw new Error("synthetic live server exited before becoming ready");
+    try {
+      const response = await fetch(`${url}/api/health`);
+      if (response.ok) return;
+    } catch {
+      // The isolated server is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("synthetic live server did not become ready");
+}
+
+async function stopLiveServer(child: ChildProcess) {
+  if (child.exitCode !== null) return;
+  const exited = once(child, "exit");
+  child.kill("SIGTERM");
+  await Promise.race([
+    exited,
+    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  ]);
+  if (child.exitCode === null) child.kill("SIGKILL");
+}
 
 async function scenario(page: Page, name: string) {
   await page.getByRole("button", { name, exact: true }).click();
@@ -202,6 +248,103 @@ test("reduced motion removes beacon, skeleton, and running-check animation", asy
     .first()
     .evaluate((element) => getComputedStyle(element, "::after").animationName);
   expect(skeletonAnimation).toBe("none");
+});
+
+test("production live mode renders current Claude windows on an isolated loopback server", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "live-mode smoke runs once");
+  const fixture = await createSyntheticLiveFixture();
+  const port = await isolatedPort();
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, ["server.mjs"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      NEXT_TELEMETRY_DISABLED: "1",
+      CREWDECK_DEMO: "0",
+      CREWDECK_HOST: "127.0.0.1",
+      CREWDECK_PORT: String(port),
+      FM_HOME: fixture.config.fmHome!,
+      CREWDECK_FLEET_COMMAND: fixture.config.fleetCommand!,
+      CREWDECK_QUOTA_COMMAND: fixture.config.quotaCommand,
+      CREWDECK_ACCOUNTS_FILE: fixture.config.accountsFile,
+    },
+    stdio: "ignore",
+  });
+
+  try {
+    await waitForLiveServer(origin, child);
+    const nonLoopback: string[] = [];
+    page.on("request", (request) => {
+      const hostname = new URL(request.url()).hostname;
+      if (hostname !== "127.0.0.1" && hostname !== "::1")
+        nonLoopback.push(request.url());
+    });
+    await page.goto(origin);
+    await expect(page.getByText("CREWDECK", { exact: true })).toBeVisible();
+    await expect(page.locator(".scenario-bar")).toHaveCount(0);
+    await expect(
+      page.getByRole("img", {
+        name: /Claude session: 71 percent remaining/u,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("img", { name: /Claude week: 64 percent remaining/u }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("img", {
+        name: /Claude Fable week: 71 percent remaining/u,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".gauge-card.limiting").filter({ hasText: "Claude" }),
+    ).toContainText("week");
+    await expect(
+      page.getByRole("img", { name: /Codex week: 61 percent remaining/u }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".gauge-card").filter({ hasText: "Claude" }).first(),
+    ).not.toContainText("reset unavailable");
+
+    const quota = await page.evaluate(async () => {
+      const response = await fetch("/api/quota");
+      return (await response.json()) as {
+        providers: Array<{
+          provider: string;
+          windows: Array<{
+            id: string;
+            percentRemaining: number | null;
+            resetsAt: number | null;
+          }>;
+        }>;
+      };
+    });
+    const claude = quota.providers.find(
+      (provider) => provider.provider === "claude",
+    );
+    expect(
+      claude?.windows.map((window) => ({
+        id: window.id,
+        remaining: window.percentRemaining,
+        hasReset: window.resetsAt !== null,
+      })),
+    ).toEqual([
+      { id: "five_hour", remaining: 71, hasReset: true },
+      { id: "seven_day", remaining: 64, hasReset: true },
+      { id: "model:fable", remaining: 71, hasReset: true },
+    ]);
+    expect(nonLoopback).toEqual([]);
+    expect(JSON.stringify(quota)).not.toMatch(
+      /(?:\/home\/|\/Users\/|[A-Z]:\\)/u,
+    );
+    expect(JSON.stringify(quota)).not.toMatch(
+      /"(?:username|email|path|token|secret|cookie|credential|cost|credits?|price|amount)"\s*:/iu,
+    );
+  } finally {
+    await stopLiveServer(child);
+  }
 });
 
 test("every request stays loopback and every browser JSON payload is clean", async ({

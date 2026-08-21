@@ -74,7 +74,7 @@ Authentication always happens in the official provider CLI (`claude /login` or `
 
 Disconnect deletes only Crewdeck's alias/source registration. It never edits native CLI credential stores. Native logout or revocation is a separate explicit official-CLI action.
 
-Per-account windows stay separate. A provider overview appears only when every reporting account has the same window IDs; it displays the **best account per window**, labeled with the owning alias. Crewdeck never sums or averages quotas. Missing Fable, model, account, percentage, reset, pace, or relationship data remains absent or explicitly unavailable.
+Per-account windows stay separate. A provider overview appears only when every reporting account has the same window IDs; it displays the **best account per window**, labeled with the owning alias. Crewdeck never sums or averages quotas. Missing Fable, model, account, percentage, reset, pace, or relationship data remains absent or explicitly unavailable. When a provider supplies no windows, Crewdeck shows its safe state and reason plus the exact zero-window evidence boundary; it never invents usage or reset values. A partial Claude report marks a missing session or weekly window without treating optional Fable data as expected.
 
 ## Testing
 
