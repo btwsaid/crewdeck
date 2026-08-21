@@ -83,7 +83,8 @@ export function Crewdeck() {
         if (active) setConnection("reconnecting");
       });
 
-    const source = new EventSource("/api/stream");
+    let source: EventSource | null = null;
+    let reconnectTimer: number | null = null;
     const receive = <T,>(
       event: MessageEvent<string>,
       setter: (value: T) => void,
@@ -94,23 +95,39 @@ export function Crewdeck() {
       setLastHeartbeat(receivedAt);
       setNow(receivedAt);
     };
-    source.addEventListener("fleet", (event) =>
-      receive(event as MessageEvent<string>, setFleet),
-    );
-    source.addEventListener("quota", (event) =>
-      receive(event as MessageEvent<string>, setQuota),
-    );
-    source.addEventListener("accounts", (event) =>
-      receive(event as MessageEvent<string>, setAccounts),
-    );
-    source.addEventListener("heartbeat", () => {
-      setLastHeartbeat(Date.now());
-      setConnection("live");
-    });
-    source.onerror = () => setConnection("reconnecting");
+    const connect = () => {
+      if (!active) return;
+      const nextSource = new EventSource("/api/stream");
+      source = nextSource;
+      nextSource.addEventListener("fleet", (event) =>
+        receive(event as MessageEvent<string>, setFleet),
+      );
+      nextSource.addEventListener("quota", (event) =>
+        receive(event as MessageEvent<string>, setQuota),
+      );
+      nextSource.addEventListener("accounts", (event) =>
+        receive(event as MessageEvent<string>, setAccounts),
+      );
+      nextSource.addEventListener("heartbeat", () => {
+        setLastHeartbeat(Date.now());
+        setConnection("live");
+      });
+      nextSource.onerror = () => {
+        if (!active || source !== nextSource) return;
+        setConnection("reconnecting");
+        nextSource.close();
+        source = null;
+        reconnectTimer ??= window.setTimeout(() => {
+          reconnectTimer = null;
+          connect();
+        }, 1_000);
+      };
+    };
+    connect();
     return () => {
       active = false;
-      source.close();
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      source?.close();
     };
   }, []);
 

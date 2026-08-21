@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assertCleanPayload, publicJson, safeNarrative } from "@/server/safety";
+import {
+  assertCleanPayload,
+  publicJson,
+  safeDisplayToken,
+  safeNarrative,
+} from "@/server/safety";
 
 const hostileEmail = ["captain", "example.invalid"].join("@");
 const hostilePath = ["", "home", "synthetic-user", "private-project"].join("/");
@@ -27,10 +32,17 @@ describe("presentation safety boundary", () => {
     expect(() => assertCleanPayload(payload)).toThrow(/private/u);
   });
 
-  it("withholds an entire unsafe narrative instead of partially leaking it", () => {
+  it("withholds unsafe narratives and display tokens instead of partially leaking them", () => {
     expect(safeNarrative(`update at ${hostilePath}`, "withheld")).toBe(
       "withheld",
     );
     expect(safeNarrative(hostileEmail, "withheld")).toBe("withheld");
+    expect(safeDisplayToken(hostilePath, "unassigned")).toBe("unassigned");
+    expect(
+      safeDisplayToken(
+        ["ghp", "syntheticcredential123"].join("_"),
+        "not reported",
+      ),
+    ).toBe("not reported");
   });
 });

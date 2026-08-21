@@ -58,7 +58,7 @@ export function safeDisplayToken(
     !trimmed ||
     trimmed.length > maximum ||
     ANSI_OR_CONTROL.test(trimmed) ||
-    EMAIL.test(trimmed)
+    isSensitiveText(trimmed)
   )
     return fallback;
   if (!/^[\p{L}\p{N} ._:+@/()\[\]-]+$/u.test(trimmed)) return fallback;
