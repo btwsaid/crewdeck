@@ -385,10 +385,19 @@ button:disabled {
   color: var(--ink-3);
 }
 .gauge-why,
-.gauge-limit-note {
+.gauge-limit-note,
+.gauge-query-error {
   font-size: 11px;
   color: var(--ink-4);
   line-height: 1.4;
+}
+.gauge-query-error {
+  padding-left: 8px;
+  border-left: 2px solid var(--sig-decision);
+}
+.gauge-query-error b {
+  color: var(--sig-decision);
+  font-weight: 500;
 }
 .gauge-limit-note b {
   color: var(--sig-blocked);
@@ -1092,6 +1101,19 @@ button:disabled {
 .modal-state.err {
   color: var(--sig-blocked);
   border-color: rgba(224, 87, 79, 0.35);
+}
+.detection-note span {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink-2);
+}
+.detection-note:focus {
+  outline: 2px solid var(--line-focus);
+  outline-offset: 2px;
+}
+button[aria-disabled="true"] {
+  cursor: help;
+  opacity: 0.62;
 }
 
 .scenario-bar {

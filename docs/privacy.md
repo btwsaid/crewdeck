@@ -16,7 +16,7 @@ Firstmate homes can contain prompts, status prose, filesystem locations, termina
 
 - Worker: task slug, project display name, safe task-part/status text, kind, runtime family, model display name, effort, semantic status, start/end/update times, phase counts/label, next semantic gate, numeric PR identity/state, aggregate CI state/check label, blocker/decision-safe summary, stale marker.
 - Home: generated Crewdeck home ID, captain-facing primary/second-mate label, availability, safe reason, last observation time.
-- Quota: schema version, provider/plan/source kind, account alias, exact source state, safe reason, window ID/label/kind, remaining percentage, reset/window timestamps, elapsed tide percentage, pace fields, limiting IDs, comparability state.
+- Quota: schema version, provider/plan/source kind, account alias, exact source state, safe reason, latest query-error observation/reason, window ID/label/kind, remaining percentage, reset/window timestamps, elapsed tide percentage, pace fields, limiting IDs, comparability state.
 - Account: captain alias, provider, plan, masked non-secret source identifier, quota windows/state, safe limitation note.
 
 No wildcard object spread is used across this boundary.
@@ -30,6 +30,8 @@ Status and reason prose is normalized, length-bounded, and replaced wholesale wh
 ## Account and quota safety
 
 Crewdeck calls only `quota-axi --json`. It never invokes or ingests `--full`. Official CLIs own sign-in and logout. Crewdeck accepts no credential field and disconnects no native profile. A profile can be registered only after the authoritative safe source reports a stable masked identifier; otherwise detection says unsupported.
+
+Transient Claude query failures can retain a prior field-by-field presentation snapshot only in process. Retention removes stale pace and limiting claims, drops reset-expired windows, expires resetless session evidence after five hours and weekly/model evidence after seven days, and never survives process restart. Authentication rejection is definitive and bypasses retention.
 
 ## Residual risks
 

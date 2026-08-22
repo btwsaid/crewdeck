@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseQuotaPayload } from "@/server/quota-parser";
+import {
+  parseQuotaPayload,
+  quotaExecutionError,
+  retainLastGoodClaude,
+} from "@/server/quota-parser";
 import { assertCleanPayload } from "@/server/safety";
 
 const base = {
@@ -113,6 +117,24 @@ describe("quota schema v3", () => {
     expect(provider.limitingWindowIds).toEqual([]);
   });
 
+  it("separates a source-supplied stale cache from its latest query error", () => {
+    const payload = structuredClone(base);
+    payload.providers[0].source = "cache";
+    payload.providers[0].state.status = "stale";
+    payload.providers[0].state.stale = true;
+    const state = payload.providers[0]
+      .state as (typeof payload.providers)[0]["state"] & { error?: string };
+    state.error = "Claude quota endpoint rate limited";
+    const provider = parseQuotaPayload(payload, 20).providers[0];
+
+    expect(provider.state.status).toBe("stale");
+    expect(provider.windows).toHaveLength(3);
+    expect(provider.queryError).toEqual({
+      observedAt: 20,
+      reason: "Claude quota endpoint rate limited",
+    });
+  });
+
   it("preserves exact partial and provider failure states", () => {
     const payload: unknown = {
       ...structuredClone(base),
@@ -134,6 +156,9 @@ describe("quota schema v3", () => {
     expect(result.source.status).toBe("partial");
     expect(result.providers[1].state.status).toBe("rate_limited");
     expect(result.providers[1].reason).toMatch(/rate limited/u);
+    expect(result.providers[1].queryError).toMatchObject({
+      reason: expect.stringMatching(/rate limited/u),
+    });
   });
 
   it("keeps a provider with no authoritative evidence explicit", () => {
@@ -146,7 +171,124 @@ describe("quota schema v3", () => {
       provider: "claude",
       state: { status: "auth_required" },
       windows: [],
+      queryError: null,
     });
     expect(provider.reason).toMatch(/official provider CLI/u);
+  });
+});
+
+describe("last-good Claude evidence", () => {
+  const observedAt = Date.parse("2035-01-01T00:10:00Z");
+
+  function failedClaude(status: "rate_limited" | "auth_required") {
+    const payload = structuredClone(base);
+    payload.generatedAt = new Date(observedAt + 60_000).toISOString();
+    payload.providers[0].state.status = status;
+    payload.providers[0].state.stale = false;
+    const state = payload.providers[0]
+      .state as (typeof payload.providers)[0]["state"] & {
+      error?: string;
+    };
+    state.error =
+      status === "rate_limited"
+        ? "Claude quota endpoint rate limited"
+        : "Claude sign-in required";
+    payload.providers[0].windows = [];
+    return parseQuotaPayload(payload, observedAt + 60_000);
+  }
+
+  it("retains unexpired windows as stale when a later source query is rate limited", () => {
+    const lastGood = parseQuotaPayload(base, observedAt);
+    const result = retainLastGoodClaude(
+      failedClaude("rate_limited"),
+      lastGood,
+      observedAt + 60_000,
+    );
+    const claude = result.providers[0];
+
+    expect(result.source.status).toBe("stale");
+    expect(claude.state).toEqual({
+      status: "stale",
+      refreshedAt: Date.parse(base.providers[0].state.refreshedAt),
+    });
+    expect(claude.windows.map((window) => window.id)).toEqual([
+      "five_hour",
+      "seven_day",
+      "model:fable",
+    ]);
+    expect(
+      claude.windows.every((window) => window.pace.status === "unknown"),
+    ).toBe(true);
+    expect(claude.queryError).toMatchObject({
+      observedAt: observedAt + 60_000,
+      reason: "Claude quota endpoint rate limited",
+    });
+    expect(claude.limitingWindowIds).toEqual([]);
+  });
+
+  it("reports first-start rate limiting without fabricating evidence", () => {
+    const result = retainLastGoodClaude(
+      failedClaude("rate_limited"),
+      quotaExecutionError("not collected yet", observedAt),
+      observedAt + 60_000,
+    );
+    expect(result.providers[0]).toMatchObject({
+      state: { status: "rate_limited" },
+      windows: [],
+    });
+  });
+
+  it("replaces retained evidence on recovery and leaves Codex untouched", () => {
+    const lastGood = parseQuotaPayload(base, observedAt);
+    const stale = retainLastGoodClaude(
+      failedClaude("rate_limited"),
+      lastGood,
+      observedAt + 60_000,
+    );
+    const recoveredPayload = structuredClone(base);
+    recoveredPayload.providers[0].windows[0].percentRemaining = 77;
+    const recovered = parseQuotaPayload(recoveredPayload, observedAt + 120_000);
+    const codex = {
+      ...recovered.providers[0],
+      provider: "codex",
+      label: "Codex",
+      windows: [
+        {
+          ...recovered.providers[0].windows[0],
+          id: "weekly",
+          label: "week",
+        },
+      ],
+    };
+    recovered.providers.push(codex);
+
+    const result = retainLastGoodClaude(recovered, stale, observedAt + 120_000);
+    expect(result.providers[0]).toMatchObject({
+      state: { status: "fresh" },
+      queryError: null,
+    });
+    expect(result.providers[0].windows[0].percentRemaining).toBe(77);
+    expect(result.providers[1]).toBe(codex);
+  });
+
+  it("expires old evidence and clears it for definitive authentication failure", () => {
+    const lastGood = parseQuotaPayload(base, observedAt);
+    const expired = retainLastGoodClaude(
+      failedClaude("rate_limited"),
+      lastGood,
+      Date.parse("2035-01-08T00:00:00Z"),
+    );
+    expect(expired.providers[0].windows).toEqual([]);
+    expect(expired.providers[0].state.status).toBe("rate_limited");
+
+    const signedOut = retainLastGoodClaude(
+      failedClaude("auth_required"),
+      lastGood,
+      observedAt + 60_000,
+    );
+    expect(signedOut.providers[0]).toMatchObject({
+      state: { status: "auth_required" },
+      windows: [],
+    });
   });
 });

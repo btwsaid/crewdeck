@@ -100,7 +100,7 @@ function errorReason(
     : safeNarrative(raw, fallbacks[status] ?? "quota source error", 180);
 }
 
-function mapProvider(value: unknown): ProviderQuota | null {
+function mapProvider(value: unknown, now: number): ProviderQuota | null {
   if (!isRecord(value)) return null;
   const provider = safeIdentifier(value.provider, "");
   if (!provider) return null;
@@ -134,6 +134,10 @@ function mapProvider(value: unknown): ProviderQuota | null {
         .filter((id) => id && reportedWindowIds.has(id)),
     ),
   ];
+  const reason = errorReason(state, status);
+  const queryFailed =
+    ["rate_limited", "unavailable", "error"].includes(status) ||
+    (status === "stale" && state.error !== undefined);
   return {
     provider,
     label: safeDisplayToken(value.label, provider, 50),
@@ -145,7 +149,8 @@ function mapProvider(value: unknown): ProviderQuota | null {
     sourceKind: safeDisplayToken(value.source, "unavailable", 40),
     state: { status, refreshedAt: safeTimestamp(state.refreshedAt) },
     windows,
-    reason: errorReason(state, status),
+    reason,
+    queryError: queryFailed && reason ? { observedAt: now, reason } : null,
     limitingWindowIds,
     relationship: "unknown",
   };
@@ -174,7 +179,7 @@ export function parseQuotaPayload(
 
   const providers = Array.isArray(raw.providers)
     ? raw.providers
-        .map(mapProvider)
+        .map((provider) => mapProvider(provider, now))
         .filter((provider): provider is ProviderQuota => provider !== null)
     : [];
   const refreshedAt = safeTimestamp(raw.generatedAt) ?? now;
@@ -208,6 +213,126 @@ export function parseQuotaPayload(
     },
     providers,
   };
+}
+
+const fiveHoursMs = 5 * 60 * 60 * 1_000;
+const sevenDaysMs = 7 * 24 * 60 * 60 * 1_000;
+const transientClaudeStates: QuotaState[] = [
+  "rate_limited",
+  "unavailable",
+  "error",
+];
+
+function retainableClaudeWindows(
+  provider: ProviderQuota,
+  now: number,
+): QuotaWindow[] {
+  const refreshedAt = provider.state.refreshedAt;
+  if (
+    !["fresh", "stale"].includes(provider.state.status) ||
+    refreshedAt === null ||
+    refreshedAt > now ||
+    now - refreshedAt >= sevenDaysMs
+  ) {
+    return [];
+  }
+  const age = now - refreshedAt;
+  return provider.windows
+    .filter((window) => {
+      if (window.resetsAt !== null) return window.resetsAt > now;
+      if (window.kind === "weekly" || window.kind === "model")
+        return age < sevenDaysMs;
+      if (window.kind === "session") return age < fiveHoursMs;
+      return false;
+    })
+    .map((window) => ({
+      ...window,
+      elapsedPercent: null,
+      pace: {
+        status: "unknown" as const,
+        burnMultiple: null,
+        projectedExhaustedAt: null,
+        projectionConfidence: null,
+      },
+    }));
+}
+
+function summarizeReconciledSource(snapshot: QuotaSnapshot): QuotaSnapshot {
+  if (snapshot.source.status === "unsupported") return snapshot;
+  const reporting = snapshot.providers.filter((provider) =>
+    ["fresh", "stale"].includes(provider.state.status),
+  );
+  const stale = reporting.filter(
+    (provider) => provider.state.status === "stale",
+  ).length;
+  const failures = snapshot.providers.length - reporting.length;
+  const status =
+    reporting.length === 0
+      ? "error"
+      : failures > 0
+        ? "partial"
+        : stale > 0
+          ? "stale"
+          : "live";
+  return {
+    ...snapshot,
+    source: {
+      ...snapshot.source,
+      status,
+      reason:
+        status === "partial"
+          ? `${reporting.length} of ${snapshot.providers.length} providers reporting${stale > 0 ? `; ${stale} retained stale` : ""}`
+          : status === "stale"
+            ? "authoritative quota values are stale"
+            : status === "live"
+              ? null
+              : snapshot.source.reason,
+    },
+  };
+}
+
+export function retainLastGoodClaude(
+  next: QuotaSnapshot,
+  previous: QuotaSnapshot,
+  now = Date.now(),
+): QuotaSnapshot {
+  if (next.source.status === "unsupported") return next;
+  const currentIndex = next.providers.findIndex(
+    (provider) => provider.provider === "claude",
+  );
+  const current = next.providers[currentIndex];
+  const transientFailure = current
+    ? transientClaudeStates.includes(current.state.status) &&
+      current.windows.length === 0
+    : next.source.status === "error";
+  if (!transientFailure) return next;
+
+  const lastGood = previous.providers.find(
+    (provider) => provider.provider === "claude",
+  );
+  if (!lastGood) return next;
+  const windows = retainableClaudeWindows(lastGood, now);
+  if (windows.length === 0) return next;
+
+  const queryReason =
+    current?.queryError?.reason ??
+    current?.reason ??
+    next.source.reason ??
+    "latest quota source query failed";
+  const retained: ProviderQuota = {
+    ...lastGood,
+    state: { status: "stale", refreshedAt: lastGood.state.refreshedAt },
+    windows,
+    reason:
+      "Last authoritative Claude allowance is retained while the latest source query is unavailable.",
+    queryError: { observedAt: now, reason: queryReason },
+    limitingWindowIds: [],
+    relationship: "unknown",
+  };
+  const providers = [...next.providers];
+  if (currentIndex >= 0) providers[currentIndex] = retained;
+  else providers.push(retained);
+  return summarizeReconciledSource({ ...next, providers });
 }
 
 export function quotaExecutionError(

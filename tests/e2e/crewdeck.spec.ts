@@ -335,6 +335,35 @@ test("production live mode renders current Claude windows on an isolated loopbac
       { id: "seven_day", remaining: 64, hasReset: true },
       { id: "model:fable", remaining: 71, hasReset: true },
     ]);
+
+    const fleet = await page.evaluate(async () => {
+      const response = await fetch("/api/fleet");
+      return (await response.json()) as {
+        workers: Array<{ runtime: string }>;
+      };
+    });
+    expect(fleet.workers.every((worker) => worker.runtime !== "claude")).toBe(
+      true,
+    );
+
+    await page.getByRole("tab", { name: "Accounts" }).click();
+    await page.getByRole("button", { name: "+ Add account" }).click();
+    const detectionNote = page.getByRole("note");
+    const detectionControl = page.getByRole("button", {
+      name: "Detection unavailable",
+    });
+    await expect(detectionNote).toContainText(
+      "no stable masked profile identifiers",
+    );
+    await expect(detectionNote).toContainText("Safe next action");
+    await expect(detectionControl).toHaveAttribute("aria-disabled", "true");
+    await expect(detectionControl).toHaveAttribute(
+      "aria-describedby",
+      "profile-detection-note",
+    );
+    await detectionControl.focus();
+    await expect(detectionControl).toBeFocused();
+
     expect(nonLoopback).toEqual([]);
     expect(JSON.stringify(quota)).not.toMatch(
       /(?:\/home\/|\/Users\/|[A-Z]:\\)/u,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildAccountsSnapshot, comparableWindows } from "@/server/accounts";
 import type {
   AccountView,
+  DetectedProfile,
   ProviderQuota,
   QuotaSnapshot,
   QuotaWindow,
@@ -57,6 +58,7 @@ describe("multi-account comparability", () => {
       state: { status: "fresh", refreshedAt: 1 },
       windows: [window("five_hour", 73), window("seven_day", 61)],
       reason: null,
+      queryError: null,
       limitingWindowIds: ["seven_day"],
       relationship: "unknown",
     };
@@ -87,6 +89,43 @@ describe("multi-account comparability", () => {
       { alias: "flagship", state: "unavailable", windows: [] },
       { alias: "reserve", state: "unavailable", windows: [] },
     ]);
+  });
+
+  it("enables detection only for an authoritatively supplied stable masked profile", () => {
+    const detected: DetectedProfile = {
+      provider: "claude",
+      sourceId: "claude:oauth-profile:····a4f2",
+      plan: "synthetic",
+      state: "fresh",
+    };
+    const quota: QuotaSnapshot = {
+      generatedAt: 1,
+      schemaVersion: 3,
+      source: { status: "live", refreshedAt: 1, reason: null },
+      providers: [],
+    };
+
+    expect(buildAccountsSnapshot([], quota, [detected], null, 2)).toMatchObject(
+      {
+        detection: { status: "ready", reason: null },
+        detected: [detected],
+      },
+    );
+    expect(
+      buildAccountsSnapshot(
+        [],
+        quota,
+        [],
+        "safe provider totals have no stable profile identifiers",
+        2,
+      ),
+    ).toMatchObject({
+      detection: {
+        status: "unsupported",
+        reason: "safe provider totals have no stable profile identifiers",
+      },
+      detected: [],
+    });
   });
 
   it("refuses to merge unlike window sets", () => {

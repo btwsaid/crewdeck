@@ -104,6 +104,7 @@ export interface ProviderQuota {
   state: { status: QuotaState; refreshedAt: number | null };
   windows: QuotaWindow[];
   reason: string | null;
+  queryError: { observedAt: number; reason: string } | null;
   limitingWindowIds: string[];
   relationship: "comparable" | "incomparable" | "unknown";
 }

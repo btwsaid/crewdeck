@@ -26,7 +26,11 @@ import {
   type FleetEnrichment,
 } from "./fleet-parser";
 import { parseMetaAllowlist } from "./meta-parser";
-import { parseQuotaPayload, quotaExecutionError } from "./quota-parser";
+import {
+  parseQuotaPayload,
+  quotaExecutionError,
+  retainLastGoodClaude,
+} from "./quota-parser";
 import { assertCleanPayload, isRecord, safeIdentifier } from "./safety";
 import {
   getDemoScenario,
@@ -331,11 +335,15 @@ export class CrewdeckService {
           timeoutMs: 20_000,
         },
       );
-      const next = parseQuotaPayload(JSON.parse(result.stdout) as unknown);
+      const parsed = parseQuotaPayload(JSON.parse(result.stdout) as unknown);
+      const next = retainLastGoodClaude(parsed, this.quota);
       assertCleanPayload(next);
       this.quota = next;
     } catch {
-      this.quota = quotaExecutionError("quota-axi --json failed");
+      this.quota = retainLastGoodClaude(
+        quotaExecutionError("quota-axi --json failed"),
+        this.quota,
+      );
     } finally {
       this.refreshingQuota = false;
       await this.refreshAccounts();
@@ -368,7 +376,7 @@ export class CrewdeckService {
         registrations,
         this.quota,
         this.detectedProfiles(),
-        "quota-axi --json does not report stable per-profile identifiers; no account relationship is inferred",
+        "The safe quota source reports provider totals but no stable masked profile identifiers; no account relationship is inferred",
       );
     } catch {
       this.accounts = {

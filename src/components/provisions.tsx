@@ -42,6 +42,17 @@ function GaugeTrack({
   );
 }
 
+function QueryError({ provider }: { provider: ProviderQuota }) {
+  if (!provider.queryError) return null;
+  return (
+    <div className="gauge-query-error" role="status">
+      <b>Latest source query failed</b> · observed{" "}
+      {formatAbsolute(provider.queryError.observedAt)} —{" "}
+      {provider.queryError.reason}
+    </div>
+  );
+}
+
 function GaugeWindowCard({
   provider,
   window,
@@ -74,7 +85,12 @@ function GaugeWindowCard({
             : window.pace.status.replace("_", " ")}
         </span>
         <span className={`gauge-state ${state === "stale" ? "stale" : ""}`}>
-          {state}
+          <span>{state}</span>
+          {state === "stale" && (
+            <span>
+              {` · last authoritative ${provider.state.refreshedAt === null ? "time unavailable" : formatAbsolute(provider.state.refreshedAt)}`}
+            </span>
+          )}
         </span>
       </div>
       {window.pace.burnMultiple !== null && (
@@ -82,7 +98,10 @@ function GaugeWindowCard({
           pace source: {window.pace.burnMultiple.toFixed(1)}× burn multiple
         </div>
       )}
-      {provider.reason && <div className="gauge-why">{provider.reason}</div>}
+      <QueryError provider={provider} />
+      {provider.reason && provider.reason !== provider.queryError?.reason && (
+        <div className="gauge-why">{provider.reason}</div>
+      )}
       {limiting && (
         <div className="gauge-limit-note">
           <b>limiting window</b> — authoritative source marks this window as
@@ -149,12 +168,15 @@ function UnavailableProvider({ provider }: { provider: ProviderQuota }) {
         role="img"
         aria-label={`${provider.label} quota unavailable`}
       />
+      <QueryError provider={provider} />
+      {provider.reason && provider.reason !== provider.queryError?.reason && (
+        <div className="gauge-why">{provider.reason}</div>
+      )}
       <div className="gauge-why">
-        {provider.reason ?? "authoritative window not reported"}
-      </div>
-      <div className="gauge-why">
-        Authoritative source supplied no quota windows; Crewdeck inferred no
-        usage or reset values.
+        {provider.provider === "claude" &&
+        ["rate_limited", "unavailable", "error"].includes(provider.state.status)
+          ? "No last-known authoritative Claude allowance is available in this Crewdeck process. Allowance is unknown — not exhausted. Keep the official CLI signed in and let Crewdeck retry; no Claude process needs to stay running."
+          : "Authoritative source supplied no quota windows; Crewdeck inferred no usage or reset values."}
       </div>
       <div className="gauge-foot">
         <span className="gauge-state">{provider.state.status} · no data</span>
