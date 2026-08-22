@@ -265,6 +265,7 @@ function providerFixtures(
       ],
       reason:
         scenario === "stale" ? "last authoritative values are stale" : null,
+      queryError: null,
       limitingWindowIds: ["five_hour"],
       relationship: "unknown",
     },
@@ -311,6 +312,13 @@ function providerFixtures(
       reason:
         scenario === "partial" || scenario === "source-failure"
           ? "authoritative local fixture source returned an error"
+          : null,
+      queryError:
+        scenario === "partial" || scenario === "source-failure"
+          ? {
+              observedAt: now,
+              reason: "authoritative local fixture source returned an error",
+            }
           : null,
       limitingWindowIds: ["weekly"],
       relationship: "unknown",

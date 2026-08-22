@@ -8,8 +8,14 @@ interface FleetState {
   fail: boolean;
 }
 
-interface QuotaState {
+export interface QuotaState {
   percentRemaining: number;
+  claudeStatus?: "fresh" | "rate_limited" | "auth_required";
+}
+
+interface SyntheticLiveFixtureOptions {
+  workerHarness?: "pi" | "claude";
+  initialQuotaState?: QuotaState;
 }
 
 export interface SyntheticLiveFixture {
@@ -18,8 +24,11 @@ export interface SyntheticLiveFixture {
   writeQuotaState(state: QuotaState): Promise<void>;
 }
 
-export async function createSyntheticLiveFixture(): Promise<SyntheticLiveFixture> {
+export async function createSyntheticLiveFixture(
+  options: SyntheticLiveFixtureOptions = {},
+): Promise<SyntheticLiveFixture> {
   const directory = await mkdtemp(join(tmpdir(), "crewdeck-live-fixture-"));
+  const workerHarness = options.workerHarness ?? "pi";
   const home = join(directory, "firstmate-home");
   const stateDirectory = join(home, "state");
   const commandDirectory = join(directory, "commands");
@@ -40,13 +49,13 @@ export async function createSyntheticLiveFixture(): Promise<SyntheticLiveFixture
   };
   await Promise.all([
     writeFleetState({ revision: 1, fail: false }),
-    writeQuotaState({ percentRemaining: 71 }),
+    writeQuotaState(options.initialQuotaState ?? { percentRemaining: 71 }),
     writeFile(
       join(stateDirectory, "synthetic-live-worker.meta"),
       [
         `project=${["", "private", "synthetic-home", "synthetic-project"].join("/")}`,
         "kind=ship",
-        "harness=pi",
+        `harness=${workerHarness}`,
         "model=synthetic-model",
         "effort=xhigh",
       ].join("\n"),
@@ -68,7 +77,7 @@ console.log(JSON.stringify({
   tasks: [{
     id: "synthetic-live-worker",
     kind: "ship",
-    harness: "pi",
+    harness: ${JSON.stringify(workerHarness)},
     project: "synthetic-project",
     current_state: {
       state: "working",
@@ -93,6 +102,14 @@ import { readFileSync } from "node:fs";
 if (process.argv[2] !== "--json") process.exit(64);
 const state = JSON.parse(readFileSync(${JSON.stringify(quotaState)}, "utf8"));
 const generatedAt = new Date().toISOString();
+const claudeStatus = ["fresh", "rate_limited", "auth_required"].includes(state.claudeStatus)
+  ? state.claudeStatus
+  : "fresh";
+const claudeError = claudeStatus === "rate_limited"
+  ? "Claude quota endpoint rate limited"
+  : claudeStatus === "auth_required"
+    ? "Claude sign-in required"
+    : undefined;
 console.log(JSON.stringify({
   schemaVersion: 3,
   generatedAt,
@@ -101,8 +118,13 @@ console.log(JSON.stringify({
     label: "Claude",
     plan: "synthetic",
     source: "oauth",
-    state: { status: "fresh", stale: false, refreshedAt: generatedAt },
-    windows: [{
+    state: {
+      status: claudeStatus,
+      stale: false,
+      refreshedAt: claudeStatus === "fresh" ? generatedAt : null,
+      error: claudeError,
+    },
+    windows: claudeStatus === "fresh" ? [{
       id: "five_hour",
       label: "session",
       kind: "session",
@@ -126,7 +148,7 @@ console.log(JSON.stringify({
       resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
       windowSeconds: 604800,
       pace: { status: "unknown" },
-    }],
+    }] : [],
     quotaSemantics: {
       status: "known",
       effectiveAvailability: [{

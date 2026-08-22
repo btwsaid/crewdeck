@@ -70,11 +70,13 @@ Status reconciliation gives attention priority to `blocked`, `needs decision`, a
 
 ## Accounts and quota limitations
 
-Authentication always happens in the official provider CLI (`claude /login` or `codex login`). Crewdeck has no password, cookie, key, or access-token input. Detect can register only profiles for which the safe authoritative source reports a stable masked profile identifier. Current `quota-axi` schema v3 `--json` installations may report provider totals without per-profile identifiers; Crewdeck then says detection is unsupported and does **not** infer an account relationship. It never calls `quota-axi --full`, because that surface may contain emails.
+Authentication always happens in the official provider CLI (`claude /login` or `codex login`). Crewdeck has no password, cookie, key, or access-token input. Detect can register only profiles for which the safe authoritative source reports a stable masked profile identifier. Current `quota-axi` schema v3 `--json` installations may report provider totals without per-profile identifiers; Crewdeck then labels detection unavailable, explains that provider-level Deck windows remain the safe view, and does **not** infer an account relationship. It never calls `quota-axi --full`, because that surface may contain emails.
 
 Disconnect deletes only Crewdeck's alias/source registration. It never edits native CLI credential stores. Native logout or revocation is a separate explicit official-CLI action.
 
 Per-account windows stay separate. A provider overview appears only when every reporting account has the same window IDs; it displays the **best account per window**, labeled with the owning alias. Crewdeck never sums or averages quotas. Missing Fable, model, account, percentage, reset, pace, or relationship data remains absent or explicitly unavailable. When a provider supplies no windows, Crewdeck shows its safe state and reason plus the exact zero-window evidence boundary; it never invents usage or reset values. A partial Claude report marks a missing session or weekly window without treating optional Fable data as expected.
+
+Claude collection is independent of fleet workers: Crewdeck polls `quota-axi --json` whether or not Claude is running. After one fresh observation, a transient source-query failure retains only still-valid Claude windows in process, marks their original observation time stale, removes pace/limiting claims, and expires evidence at the reported reset or a five-hour/seven-day resetless bound. The latest query error is shown separately. A restart with no safe evidence reports allowance as unknown, not exhausted; definitive sign-out or credential rejection remains unavailable and is never masked by stale data.
 
 ## Testing
 

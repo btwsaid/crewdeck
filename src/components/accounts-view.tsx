@@ -225,6 +225,7 @@ function AccountModal({
   const close = useCallback(() => onClose(), [onClose]);
   const reference = useDialog<HTMLDivElement>(modal !== null, close);
   if (!modal) return null;
+  const detectionNoteId = "profile-detection-note";
   const perform = async (action: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -281,25 +282,54 @@ function AccountModal({
                 masked non-secret source identifier.
               </span>
             </div>
-            {snapshot.detection.status !== "ready" && (
-              <div className="modal-state" role="status">
-                Detection {snapshot.detection.status}:{" "}
-                {snapshot.detection.reason}
+            {snapshot.detection.status !== "ready" ? (
+              <div
+                className="modal-state detection-note"
+                id={detectionNoteId}
+                role="note"
+                tabIndex={-1}
+              >
+                <b>Detection unavailable.</b> {snapshot.detection.reason}
+                <span>
+                  Safe next action: use provider-level windows on Deck, keep
+                  aliases separate, and try again only after the safe source
+                  reports stable masked profile identifiers.
+                </span>
               </div>
+            ) : (
+              snapshot.detected.length === 0 && (
+                <div
+                  className="modal-state detection-note"
+                  id={detectionNoteId}
+                  role="status"
+                  tabIndex={-1}
+                >
+                  No new safely identified profiles are currently reported.
+                </div>
+              )
             )}
             <div className="actions">
               <button className="ghost-btn" onClick={onClose}>
                 Cancel
               </button>
-              <button
-                className="ghost-btn primary"
-                disabled={snapshot.detected.length === 0}
-                onClick={() =>
-                  snapshot.detected[0] && onDetected(snapshot.detected[0])
-                }
-              >
-                Detect new profiles
-              </button>
+              {snapshot.detected.length > 0 ? (
+                <button
+                  className="ghost-btn primary"
+                  onClick={() => onDetected(snapshot.detected[0])}
+                >
+                  Detect new profiles
+                </button>
+              ) : (
+                <button
+                  className="ghost-btn primary"
+                  aria-disabled="true"
+                  aria-describedby={detectionNoteId}
+                >
+                  {snapshot.detection.status === "ready"
+                    ? "No new profiles"
+                    : "Detection unavailable"}
+                </button>
+              )}
             </div>
             {snapshot.detected.length > 0 && (
               <div className="detected">

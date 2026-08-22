@@ -42,6 +42,13 @@ function provider(
     state: { status, refreshedAt: Date.parse("2035-01-01T00:00:00Z") },
     windows,
     reason,
+    queryError:
+      status === "rate_limited" || status === "error"
+        ? {
+            observedAt: Date.parse("2035-01-01T01:00:00Z"),
+            reason: reason ?? "source query failed",
+          }
+        : null,
     limitingWindowIds: [],
     relationship: "unknown",
   };
@@ -117,7 +124,11 @@ describe("quota evidence presentation", () => {
       2,
     );
     expect(
-      screen.getAllByText("authoritative source is rate limited"),
+      screen
+        .getAllByRole("status")
+        .filter((element) =>
+          element.textContent?.includes("authoritative source is rate limited"),
+        ),
     ).toHaveLength(2);
   });
 
@@ -127,10 +138,54 @@ describe("quota evidence presentation", () => {
     render(<Provisions quota={snapshot(provider([staleWindow], "stale"))} />);
 
     expect(screen.getByText("stale", { exact: true })).toBeTruthy();
+    expect(screen.getByText(/last authoritative/u)).toBeTruthy();
     expect(screen.getByText("resets reset unavailable")).toBeTruthy();
     expect(screen.getByText("· absolute reset unavailable")).toBeTruthy();
     expect(
       screen.getByRole("img", { name: "Claude 5-hour session not reported" }),
+    ).toBeTruthy();
+  });
+
+  it("separates a stale allowance observation from the latest source-query failure", () => {
+    const row = provider(
+      [quotaWindow("five_hour", "session"), quotaWindow("seven_day", "week")],
+      "stale",
+      "Last authoritative Claude allowance is retained while the latest source query is unavailable.",
+    );
+    row.queryError = {
+      observedAt: Date.parse("2035-01-01T01:00:00Z"),
+      reason: "Claude quota endpoint rate limited",
+    };
+    render(<Provisions quota={snapshot(row)} />);
+
+    expect(
+      screen.getAllByText("Latest source query failed", { exact: false }),
+    ).toHaveLength(2);
+    expect(screen.getAllByText(/last authoritative/u).length).toBeGreaterThan(
+      0,
+    );
+    expect(
+      screen.getAllByText(/Claude quota endpoint rate limited/u),
+    ).toHaveLength(2);
+  });
+
+  it("labels first-start rate limiting as unknown rather than exhausted", () => {
+    render(
+      <Provisions
+        quota={snapshot(
+          provider([], "rate_limited", "Claude quota endpoint rate limited"),
+        )}
+      />,
+    );
+
+    expect(
+      screen.getByText(/No last-known authoritative Claude allowance/u),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Allowance is unknown — not exhausted/u),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/no Claude process needs to stay running/u),
     ).toBeTruthy();
   });
 });
