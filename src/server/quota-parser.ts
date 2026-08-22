@@ -182,7 +182,9 @@ export function parseQuotaPayload(
         .map((provider) => mapProvider(provider, now))
         .filter((provider): provider is ProviderQuota => provider !== null)
     : [];
-  const refreshedAt = safeTimestamp(raw.generatedAt) ?? now;
+  // generatedAt is source evidence only when the source actually supplies it;
+  // a parser or poll time must never make allowance evidence look refreshed.
+  const refreshedAt = safeTimestamp(raw.generatedAt);
   const stale = providers.some((provider) => provider.state.status === "stale");
   const failures = providers.filter(
     (provider) => !["fresh", "stale"].includes(provider.state.status),

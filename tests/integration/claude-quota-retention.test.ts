@@ -56,6 +56,8 @@ describe("Claude quota collection lifecycle", () => {
       "seven_day",
       "model:fable",
     ]);
+    const successfulEvidenceAt = initialClaude?.state.refreshedAt;
+    expect(successfulEvidenceAt).not.toBeNull();
 
     await refreshQuota(service, fixture.writeQuotaState, {
       percentRemaining: 0,
@@ -65,9 +67,12 @@ describe("Claude quota collection lifecycle", () => {
       .snapshots()
       .quota.providers.find((provider) => provider.provider === "claude");
     expect(retained).toMatchObject({
-      state: { status: "stale" },
+      state: { status: "stale", refreshedAt: successfulEvidenceAt },
       queryError: { reason: "Claude quota endpoint rate limited" },
     });
+    expect(retained?.queryError?.observedAt).toBeGreaterThanOrEqual(
+      successfulEvidenceAt as number,
+    );
     expect(
       retained?.windows.map((window) => ({
         id: window.id,

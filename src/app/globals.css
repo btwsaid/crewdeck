@@ -399,6 +399,22 @@ button:disabled {
   color: var(--sig-decision);
   font-weight: 500;
 }
+.evidence-time {
+  display: block;
+  color: var(--ink-3);
+  font: 10px/1.45 var(--mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.evidence-time.missing {
+  color: var(--sig-decision);
+}
+.evidence-absolute {
+  color: var(--ink-4);
+}
+.gauge-query-error .evidence-time {
+  margin-top: 3px;
+}
 .gauge-limit-note b {
   color: var(--sig-blocked);
   font-weight: 500;
@@ -929,6 +945,15 @@ button:disabled {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.acct-win > .evidence-time,
+.acct-win > .gauge-query-error,
+.overview-evidence-state {
+  grid-column: 1 / -1;
+}
+.overview-evidence-state {
+  color: var(--sig-decision);
+  font: 10px var(--mono);
 }
 .acct-foot {
   display: flex;

@@ -47,7 +47,7 @@ class FakeEventSource {
 }
 
 const reconnectBanner =
-  "Live feed heartbeat stopped — snapshots are retained while Crewdeck reconnects.";
+  "Live feed heartbeat stopped — snapshots and their original evidence update times are retained while Crewdeck reconnects.";
 
 afterEach(() => {
   cleanup();

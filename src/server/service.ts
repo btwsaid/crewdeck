@@ -161,6 +161,7 @@ export class CrewdeckService {
           },
           windows: provider?.windows ?? [],
           note: provider?.reason ?? null,
+          queryError: provider?.queryError ?? null,
         },
       ];
       this.refreshDemo();

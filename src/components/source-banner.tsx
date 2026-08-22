@@ -20,8 +20,9 @@ export function SourceBanners({
     banners.push({
       key: "connection",
       error: true,
-      text: "Live feed heartbeat stopped — snapshots are retained while Crewdeck reconnects.",
-      detail: "SSE reconnect state · values are marked, never extrapolated",
+      text: "Live feed heartbeat stopped — snapshots and their original evidence update times are retained while Crewdeck reconnects.",
+      detail:
+        "SSE reconnect state · update times keep aging and are never replaced by reconnect attempts",
     });
   if (fleet && ["stale", "partial", "error"].includes(fleet.source.status))
     banners.push({

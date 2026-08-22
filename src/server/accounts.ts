@@ -21,6 +21,7 @@ export function buildAccountsSnapshot(
     state: { status: "unavailable", refreshedAt: null },
     windows: [],
     note: "per-profile windows are not reported by the authoritative safe local source; provider totals are not assigned to an alias",
+    queryError: null,
   }));
   return {
     generatedAt: now,
@@ -47,6 +48,9 @@ export function comparableWindows(accounts: AccountView[]):
         label: string;
         percentRemaining: number;
         alias: string;
+        refreshedAt: number | null;
+        state: AccountView["state"]["status"];
+        queryError: AccountView["queryError"];
       }[];
     } {
   const reporting = accounts.filter((account) =>
@@ -89,6 +93,9 @@ export function comparableWindows(accounts: AccountView[]):
             label: window.label,
             percentRemaining: winner.window.percentRemaining as number,
             alias: winner.account.alias,
+            refreshedAt: winner.account.state.refreshedAt,
+            state: winner.account.state.status,
+            queryError: winner.account.queryError,
           },
         ]
       : [];

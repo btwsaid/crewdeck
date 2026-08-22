@@ -7,7 +7,8 @@ import type {
   DetectedProfile,
   QuotaWindow,
 } from "@/server/contracts";
-import { formatAgo, resetCountdown } from "./format";
+import { EvidenceTime, NoEvidenceTime } from "./evidence-time";
+import { resetCountdown } from "./format";
 import { Pennant, ShieldIcon } from "./icons";
 import { SectionCap } from "./section-cap";
 import { useDialog } from "./use-dialog";
@@ -18,7 +19,17 @@ type Modal =
   | { kind: "rename"; account: AccountView }
   | { kind: "disconnect"; account: AccountView };
 
-function MiniWindow({ window }: { window: QuotaWindow }) {
+function MiniWindow({
+  window,
+  updatedAt,
+  now,
+  subject,
+}: {
+  window: QuotaWindow;
+  updatedAt: number | null;
+  now: number;
+  subject: string;
+}) {
   const percentage = window.percentRemaining;
   return (
     <div className="acct-win">
@@ -39,6 +50,7 @@ function MiniWindow({ window }: { window: QuotaWindow }) {
         {percentage === null ? "?" : `${percentage}%`} ·{" "}
         {resetCountdown(window.resetsAt)}
       </span>
+      <EvidenceTime updatedAt={updatedAt} now={now} subject={subject} />
     </div>
   );
 }
@@ -66,7 +78,15 @@ function comparable(accounts: AccountView[]) {
         return candidate?.percentRemaining === null ||
           candidate?.percentRemaining === undefined
           ? []
-          : [{ alias: account.alias, percentage: candidate.percentRemaining }];
+          : [
+              {
+                alias: account.alias,
+                percentage: candidate.percentRemaining,
+                updatedAt: account.state.refreshedAt,
+                state: account.state.status,
+                queryError: account.queryError,
+              },
+            ];
       })
       .sort((left, right) => right.percentage - left.percentage);
     return choices[0]
@@ -78,9 +98,11 @@ function comparable(accounts: AccountView[]) {
 function ProviderOverview({
   provider,
   accounts,
+  now,
 }: {
   provider: string;
   accounts: AccountView[];
+  now: number;
 }) {
   const result = comparable(accounts);
   if (result === null) return null;
@@ -88,8 +110,8 @@ function ProviderOverview({
     return (
       <p className="acct-note provider-note">
         No combined {provider} overview: these accounts report different window
-        sets, so a merged number would be misleading. Read each account card on
-        its own terms.
+        sets, so a merged number or update time would be misleading. Read each
+        account card on its own terms; no provider time is invented.
       </p>
     );
   return (
@@ -114,14 +136,72 @@ function ProviderOverview({
           <span className="w-reset">
             best {window.percentage}% · {window.alias}
           </span>
+          <EvidenceTime
+            updatedAt={window.updatedAt}
+            now={now}
+            subject={`${provider} ${window.label} best allowance evidence from ${window.alias}`}
+          />
+          {window.state === "stale" && (
+            <span className="overview-evidence-state">
+              retained stale evidence from {window.alias}
+            </span>
+          )}
+          {window.queryError && (
+            <div className="gauge-query-error" role="status">
+              <b>Latest {window.alias} query failed</b> —{" "}
+              {window.queryError.reason}
+              <EvidenceTime
+                updatedAt={window.queryError.observedAt}
+                now={now}
+                subject={`${window.alias} profile source problem governing the ${window.label} best-account view`}
+                prefix="problem observed"
+              />
+            </div>
+          )}
         </div>
       ))}
       <div className="gauge-foot">
         <span className="gauge-state">
-          best remaining per window — not a sum or shared pool
+          best remaining per window — not a sum or shared pool; each time is the
+          named profile&apos;s evidence time, never an aggregate
         </span>
       </div>
     </article>
+  );
+}
+
+function unavailableAccountDetail(account: AccountView): string {
+  switch (account.state.status) {
+    case "auth_required":
+      return "authentication is required because credentials are absent, expired, or revoked; prior allowance is not presented";
+    case "unsupported":
+      return "this registered profile is unsupported";
+    case "rate_limited":
+    case "error":
+      return "the latest query failed and this profile has no retained last-good evidence";
+    default:
+      return "no authoritative allowance is related to this registered profile";
+  }
+}
+
+function AccountQueryError({
+  account,
+  now,
+}: {
+  account: AccountView;
+  now: number;
+}) {
+  if (!account.queryError) return null;
+  return (
+    <div className="gauge-query-error" role="status">
+      <b>Latest profile query failed</b> — {account.queryError.reason}
+      <EvidenceTime
+        updatedAt={account.queryError.observedAt}
+        now={now}
+        subject={`${account.alias} profile source problem`}
+        prefix="problem observed"
+      />
+    </div>
   );
 }
 
@@ -168,28 +248,50 @@ function AccountCard({
               {account.state.status.replace("_", " ")} · no data
             </span>
           </div>
+          <NoEvidenceTime detail={unavailableAccountDetail(account)} />
         </>
       ) : (
         <>
           <div className="acct-windows">
             {account.windows.length > 0 ? (
               account.windows.map((window) => (
-                <MiniWindow window={window} key={window.id} />
+                <MiniWindow
+                  window={window}
+                  updatedAt={account.state.refreshedAt}
+                  now={now}
+                  subject={`${account.alias} ${window.label} allowance evidence`}
+                  key={window.id}
+                />
               ))
             ) : (
-              <div className="acct-note">window not reported by source</div>
+              <>
+                <div className="acct-note">
+                  Authoritative profile report omitted all allowance windows; no
+                  values were inferred.
+                </div>
+                <EvidenceTime
+                  updatedAt={account.state.refreshedAt}
+                  now={now}
+                  subject={`${account.alias} profile report with no allowance windows`}
+                  prefix="profile report updated"
+                />
+              </>
             )}
           </div>
+          {account.note && <p className="acct-note">{account.note}</p>}
           <div className="gauge-foot">
             <span
               className={`gauge-state ${account.state.status === "stale" ? "stale" : ""}`}
             >
-              {account.state.status} · refreshed{" "}
-              {formatAgo(account.state.refreshedAt, now)}
+              {account.state.status}
+              {account.state.status === "stale"
+                ? " · retained evidence"
+                : " · evidence times shown per window"}
             </span>
           </div>
         </>
       )}
+      <AccountQueryError account={account} now={now} />
       <div className="acct-foot">
         <button className="ghost-btn" onClick={onRename}>
           Rename alias
@@ -514,7 +616,11 @@ export function AccountsView({
             >
               {provider}
             </SectionCap>
-            <ProviderOverview provider={provider} accounts={accounts} />
+            <ProviderOverview
+              provider={provider}
+              accounts={accounts}
+              now={now}
+            />
             <div className="acct-grid">
               {accounts.map((account) => (
                 <AccountCard

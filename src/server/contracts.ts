@@ -138,6 +138,7 @@ export interface AccountView extends AccountRegistration {
   state: { status: QuotaState; refreshedAt: number | null };
   windows: QuotaWindow[];
   note: string | null;
+  queryError: { observedAt: number; reason: string } | null;
 }
 
 export interface AccountsSnapshot {
