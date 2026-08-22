@@ -90,6 +90,71 @@ test("live night watch renders quota, grouped workers, runtime/model axes, and a
   ).toBeVisible();
 });
 
+test("quota values expose authoritative live relative and absolute update times", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "timing assertions run once");
+
+  for (const label of ["5-hour", "week", "Fable week"]) {
+    const card = page
+      .locator(".gauge-card")
+      .filter({ has: page.locator(".gauge-window", { hasText: label }) })
+      .filter({ hasText: "Claude" })
+      .first();
+    const evidence = card.locator("time.evidence-time").first();
+    await expect(evidence).toContainText(
+      /updated (?:just now|\d+ minutes? ago)/u,
+    );
+    await expect(evidence).toHaveAttribute(
+      "aria-label",
+      /allowance evidence updated .*; absolute local time/u,
+    );
+    await expect(evidence).toHaveAttribute("datetime", /^\d{4}-\d{2}-\d{2}T/u);
+    await expect(evidence.locator(".evidence-absolute")).toBeVisible();
+  }
+
+  await page.getByRole("tab", { name: "Accounts" }).click();
+  const nightWatch = page
+    .locator(".acct-card")
+    .filter({ hasText: "night-watch" });
+  const retainedTimes = nightWatch.locator("time.evidence-time").filter({
+    hasText: /^updated/u,
+  });
+  await expect(retainedTimes).toHaveCount(3);
+  await expect(retainedTimes.first()).toContainText(/updated 3 hours? ago/u);
+  await expect(nightWatch).toContainText("Latest profile query failed");
+  const problemTime = nightWatch
+    .locator("time.evidence-time")
+    .filter({ hasText: "problem observed" })
+    .first();
+  await expect(problemTime).toHaveAttribute(
+    "aria-label",
+    /problem observed .*; absolute local time/u,
+  );
+  expect(
+    Date.parse((await problemTime.getAttribute("datetime")) ?? ""),
+  ).toBeGreaterThan(
+    Date.parse((await retainedTimes.first().getAttribute("datetime")) ?? ""),
+  );
+
+  const overview = page.locator(".provider-overview").filter({
+    hasText: "claude · all accounts",
+  });
+  const winningRow = overview.locator(".acct-win").filter({
+    hasText: "best 96% · night-watch",
+  });
+  await expect(winningRow.locator("time.evidence-time").first()).toContainText(
+    /updated 3 hours? ago/u,
+  );
+  await expect(overview).toContainText("never an aggregate");
+
+  const signedOut = page.locator(".acct-card").filter({ hasText: "skiff" });
+  await expect(signedOut).toContainText(
+    "credentials are absent, expired, or revoked",
+  );
+  await expect(signedOut).toContainText("update time unavailable");
+});
+
 test("critical, source failure, stale recovery, and empty fleet remain explicit", async ({
   page,
 }) => {
@@ -179,7 +244,7 @@ test("account overviews label best comparable windows and refuse incomparable me
   await expect(page.getByText(/best 96% · night-watch/u)).toBeVisible();
   await scenario(page, "incomparable");
   await expect(
-    page.getByText(/merged number would be misleading/u),
+    page.getByText(/merged number or update time would be misleading/u),
   ).toBeVisible();
   await expect(page.getByText(/best remaining per window/u)).toHaveCount(0);
 });
@@ -222,6 +287,12 @@ test("layout is responsive without accidental page overflow", async ({
       );
     expect(columnCount).toBe(1);
     await expect(page.locator(".provisions")).toHaveCSS("overflow-x", "auto");
+    await expect(
+      page.locator(".gauge-card time.evidence-time").first(),
+    ).toBeVisible();
+    await expect(
+      page.locator(".gauge-card time.evidence-time").first(),
+    ).toHaveAttribute("aria-label", /absolute local time/u);
   }
 });
 
@@ -290,6 +361,13 @@ test("production live mode renders current Claude windows on an isolated loopbac
         name: /Claude session: 71 percent remaining/u,
       }),
     ).toBeVisible();
+    await expect(
+      page
+        .locator(".gauge-card")
+        .filter({ hasText: "Claude" })
+        .first()
+        .locator("time.evidence-time"),
+    ).toHaveAttribute("aria-label", /updated .*; absolute local time/u);
     await expect(
       page.getByRole("img", { name: /Claude week: 64 percent remaining/u }),
     ).toBeVisible();

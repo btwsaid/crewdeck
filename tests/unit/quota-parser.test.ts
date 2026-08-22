@@ -97,6 +97,23 @@ describe("quota schema v3", () => {
     expect(result.source.reason).toContain("expected version 3");
   });
 
+  it("never substitutes parser or payload generation time for a missing successful evidence time", () => {
+    const missing = structuredClone(base);
+    delete (
+      missing.providers[0].state as Partial<(typeof base.providers)[0]["state"]>
+    ).refreshedAt;
+    const result = parseQuotaPayload(
+      missing,
+      Date.parse("2035-01-01T00:04:00Z"),
+    );
+
+    expect(result.source.refreshedAt).toBe(
+      Date.parse("2035-01-01T00:00:00.000Z"),
+    );
+    expect(result.providers[0].state.refreshedAt).toBeNull();
+    expect(result.providers[0].windows).not.toHaveLength(0);
+  });
+
   it("does not infer malformed percentages or resets", () => {
     const hostile = structuredClone(base);
     hostile.providers[0].windows[0].percentRemaining = 900;

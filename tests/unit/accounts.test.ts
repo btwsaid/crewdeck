@@ -34,6 +34,7 @@ function account(alias: string, windows: QuotaWindow[]): AccountView {
     state: { status: "fresh", refreshedAt: 1 },
     windows,
     note: null,
+    queryError: null,
   };
 }
 
@@ -45,7 +46,17 @@ describe("multi-account comparability", () => {
     ]);
     expect(result).toEqual({
       comparable: true,
-      best: [{ id: "week", label: "week", percentRemaining: 80, alias: "b" }],
+      best: [
+        {
+          id: "week",
+          label: "week",
+          percentRemaining: 80,
+          alias: "b",
+          refreshedAt: 1,
+          state: "fresh",
+          queryError: null,
+        },
+      ],
     });
   });
   it("does not assign provider totals across registered accounts", () => {

@@ -132,12 +132,11 @@ export function Crewdeck() {
   }, []);
 
   useEffect(() => {
-    const reduced = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
     const interval = setInterval(() => {
       const timestamp = Date.now();
-      if (!reduced) setNow(timestamp);
+      // Time labels are semantic text, not motion; keep them aging even when
+      // reduced motion is requested and while the live feed reconnects.
+      setNow(timestamp);
       if (timestamp - lastHeartbeat > 35_000) setConnection("stale");
     }, 5_000);
     return () => clearInterval(interval);
@@ -217,7 +216,7 @@ export function Crewdeck() {
           aria-labelledby="tab-deck"
           hidden={view !== "deck"}
         >
-          <Provisions quota={quota} />
+          <Provisions quota={quota} now={now} />
           <FleetBoard fleet={fleet} now={now} />
         </section>
         <section

@@ -3,6 +3,7 @@ import type {
   QuotaSnapshot,
   QuotaWindow,
 } from "@/server/contracts";
+import { EvidenceTime, NoEvidenceTime } from "./evidence-time";
 import { formatAbsolute, resetCountdown } from "./format";
 import { SectionCap } from "./section-cap";
 
@@ -42,13 +43,23 @@ function GaugeTrack({
   );
 }
 
-function QueryError({ provider }: { provider: ProviderQuota }) {
+function QueryError({
+  provider,
+  now,
+}: {
+  provider: ProviderQuota;
+  now: number;
+}) {
   if (!provider.queryError) return null;
   return (
     <div className="gauge-query-error" role="status">
-      <b>Latest source query failed</b> · observed{" "}
-      {formatAbsolute(provider.queryError.observedAt)} —{" "}
-      {provider.queryError.reason}
+      <b>Latest source query failed</b> — {provider.queryError.reason}
+      <EvidenceTime
+        updatedAt={provider.queryError.observedAt}
+        now={now}
+        subject={`${provider.label} source problem`}
+        prefix="problem observed"
+      />
     </div>
   );
 }
@@ -56,9 +67,11 @@ function QueryError({ provider }: { provider: ProviderQuota }) {
 function GaugeWindowCard({
   provider,
   window,
+  now,
 }: {
   provider: ProviderQuota;
   window: QuotaWindow;
+  now: number;
 }) {
   const limiting = provider.limitingWindowIds.includes(window.id);
   const state = provider.state.status;
@@ -85,20 +98,21 @@ function GaugeWindowCard({
             : window.pace.status.replace("_", " ")}
         </span>
         <span className={`gauge-state ${state === "stale" ? "stale" : ""}`}>
-          <span>{state}</span>
-          {state === "stale" && (
-            <span>
-              {` · last authoritative ${provider.state.refreshedAt === null ? "time unavailable" : formatAbsolute(provider.state.refreshedAt)}`}
-            </span>
-          )}
+          {state}
+          {state === "stale" ? " · retained evidence" : ""}
         </span>
       </div>
+      <EvidenceTime
+        updatedAt={provider.state.refreshedAt}
+        now={now}
+        subject={`${provider.label} ${window.label} allowance evidence`}
+      />
       {window.pace.burnMultiple !== null && (
         <div className="gauge-why">
           pace source: {window.pace.burnMultiple.toFixed(1)}× burn multiple
         </div>
       )}
-      <QueryError provider={provider} />
+      <QueryError provider={provider} now={now} />
       {provider.reason && provider.reason !== provider.queryError?.reason && (
         <div className="gauge-why">{provider.reason}</div>
       )}
@@ -115,9 +129,11 @@ function GaugeWindowCard({
 function MissingWindowCard({
   provider,
   label,
+  now,
 }: {
   provider: ProviderQuota;
   label: string;
+  now: number;
 }) {
   return (
     <article className="gauge-card unavailable">
@@ -140,6 +156,13 @@ function MissingWindowCard({
       <div className="gauge-foot">
         <span className="gauge-state">missing · no data</span>
       </div>
+      <EvidenceTime
+        updatedAt={provider.state.refreshedAt}
+        now={now}
+        subject={`${provider.label} source report that omitted ${label}`}
+        prefix="source report updated"
+      />
+      <QueryError provider={provider} now={now} />
     </article>
   );
 }
@@ -154,7 +177,28 @@ function missingClaudeWindows(provider: ProviderQuota) {
   ].filter((window) => !reported.has(window.id));
 }
 
-function UnavailableProvider({ provider }: { provider: ProviderQuota }) {
+function noEvidenceDetail(provider: ProviderQuota): string {
+  switch (provider.state.status) {
+    case "auth_required":
+      return "authentication is required because credentials are absent, expired, or revoked; prior allowance is not presented";
+    case "unsupported":
+      return "this account or source is unsupported";
+    case "rate_limited":
+    case "error":
+    case "unavailable":
+      return "the query failed and no retained last-good evidence is available";
+    default:
+      return "the source reported no allowance windows";
+  }
+}
+
+function UnavailableProvider({
+  provider,
+  now,
+}: {
+  provider: ProviderQuota;
+  now: number;
+}) {
   return (
     <article className="gauge-card unavailable">
       <div className="gauge-head">
@@ -168,7 +212,7 @@ function UnavailableProvider({ provider }: { provider: ProviderQuota }) {
         role="img"
         aria-label={`${provider.label} quota unavailable`}
       />
-      <QueryError provider={provider} />
+      <QueryError provider={provider} now={now} />
       {provider.reason && provider.reason !== provider.queryError?.reason && (
         <div className="gauge-why">{provider.reason}</div>
       )}
@@ -181,11 +225,18 @@ function UnavailableProvider({ provider }: { provider: ProviderQuota }) {
       <div className="gauge-foot">
         <span className="gauge-state">{provider.state.status} · no data</span>
       </div>
+      <NoEvidenceTime detail={noEvidenceDetail(provider)} />
     </article>
   );
 }
 
-export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
+export function Provisions({
+  quota,
+  now,
+}: {
+  quota: QuotaSnapshot | null;
+  now: number;
+}) {
   const loading = !quota || quota.source.status === "loading";
   return (
     <section aria-labelledby="provisions-title">
@@ -211,6 +262,7 @@ export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
           />
           <div className="gauge-why">{quota.source.reason}</div>
           <div className="gauge-state">unsupported · no data</div>
+          <NoEvidenceTime detail="the quota source schema is unsupported" />
         </article>
       ) : quota.providers.length === 0 ? (
         <article className="gauge-card unavailable unsupported-card">
@@ -228,6 +280,7 @@ export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
               "no provider reported an authoritative window"}
           </div>
           <div className="gauge-state">unavailable · no data</div>
+          <NoEvidenceTime detail="this process has no successful allowance evidence" />
         </article>
       ) : (
         <div className="provisions">
@@ -238,6 +291,7 @@ export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
                     <GaugeWindowCard
                       provider={provider}
                       window={window}
+                      now={now}
                       key={`${provider.provider}:${provider.accountAlias ?? "none"}:${window.id}`}
                     />
                   )),
@@ -245,6 +299,7 @@ export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
                     <MissingWindowCard
                       provider={provider}
                       label={window.label}
+                      now={now}
                       key={`${provider.provider}:missing:${window.id}`}
                     />
                   )),
@@ -252,6 +307,7 @@ export function Provisions({ quota }: { quota: QuotaSnapshot | null }) {
               : [
                   <UnavailableProvider
                     provider={provider}
+                    now={now}
                     key={`${provider.provider}:unavailable`}
                   />,
                 ],

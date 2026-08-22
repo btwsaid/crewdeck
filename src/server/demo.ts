@@ -409,6 +409,7 @@ function accountViews(now: number, scenario: DemoScenario): AccountView[] {
     state: provider.state,
     windows: provider.windows,
     note: null,
+    queryError: null,
   };
   const secondWindows = [
     window("five_hour", "5-hour", 96, now + 4 * hour + 50 * minute, "ahead", 8),
@@ -435,7 +436,11 @@ function accountViews(now: number, scenario: DemoScenario): AccountView[] {
       plan: "max",
       state: { status: "stale", refreshedAt: now - 3 * hour },
       windows: secondWindows,
-      note: "last authoritative values are stale",
+      note: "Last authoritative profile allowance is retained while its latest source query is unavailable.",
+      queryError: {
+        observedAt: now - 2 * minute,
+        reason: "authoritative local fixture source returned a temporary error",
+      },
     },
     {
       alias: "reserve",
@@ -445,6 +450,7 @@ function accountViews(now: number, scenario: DemoScenario): AccountView[] {
       state: { status: "fresh", refreshedAt: now - 55_000 },
       windows: providerFixtures(now, "live")[1].windows,
       note: null,
+      queryError: null,
     },
     {
       alias: "skiff",
@@ -454,6 +460,7 @@ function accountViews(now: number, scenario: DemoScenario): AccountView[] {
       state: { status: "auth_required", refreshedAt: null },
       windows: [],
       note: "credential expired in the official Codex CLI store — run codex login in a terminal, then Detect again",
+      queryError: null,
     },
     {
       alias: "chart-room",
@@ -463,6 +470,7 @@ function accountViews(now: number, scenario: DemoScenario): AccountView[] {
       state: { status: "unsupported", refreshedAt: null },
       windows: [],
       note: "unsupported quota source schema — expected version 3; no values inferred",
+      queryError: null,
     },
   ];
 }
