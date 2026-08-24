@@ -2,6 +2,7 @@
   "name": "crewdeck",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Local-only night-watch dashboard for Firstmate fleets",
   "engines": {

@@ -93,3 +93,7 @@ npm run test:e2e
 `npm run check` runs the full local gate. Unit and integration tests cover parsers, hostile presentation fixtures, status and elapsed semantics, quota schema handling, account registry validation, fixed argv, multiple homes, partial providers, stale retention, stream events, loopback enforcement, and no live-data persistence. Playwright covers the synthetic acceptance scenarios, keyboard/focus behavior, desktop/mobile layout, reduced motion, loopback-only requests, and payload cleanliness. Public CI runs these checks with synthetic fixtures only.
 
 All committed examples, tests, and screenshots are synthetic. See [`docs/testing.md`](docs/testing.md) for scenario coverage and screenshot regeneration.
+
+## License
+
+Crewdeck is available under the [MIT License](LICENSE).
