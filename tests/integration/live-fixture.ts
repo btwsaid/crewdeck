@@ -16,6 +16,7 @@ export interface QuotaState {
 interface SyntheticLiveFixtureOptions {
   workerHarness?: "pi" | "claude";
   initialQuotaState?: QuotaState;
+  quotaSchemaVersion?: 3 | 5;
 }
 
 export interface SyntheticLiveFixture {
@@ -29,6 +30,7 @@ export async function createSyntheticLiveFixture(
 ): Promise<SyntheticLiveFixture> {
   const directory = await mkdtemp(join(tmpdir(), "crewdeck-live-fixture-"));
   const workerHarness = options.workerHarness ?? "pi";
+  const quotaSchemaVersion = options.quotaSchemaVersion ?? 3;
   const home = join(directory, "firstmate-home");
   const stateDirectory = join(home, "state");
   const commandDirectory = join(directory, "commands");
@@ -102,6 +104,7 @@ import { readFileSync } from "node:fs";
 if (process.argv[2] !== "--json") process.exit(64);
 const state = JSON.parse(readFileSync(${JSON.stringify(quotaState)}, "utf8"));
 const generatedAt = new Date().toISOString();
+const schemaVersion = ${JSON.stringify(quotaSchemaVersion)};
 const claudeStatus = ["fresh", "rate_limited", "auth_required"].includes(state.claudeStatus)
   ? state.claudeStatus
   : "fresh";
@@ -110,68 +113,99 @@ const claudeError = claudeStatus === "rate_limited"
   : claudeStatus === "auth_required"
     ? "Claude sign-in required"
     : undefined;
-console.log(JSON.stringify({
-  schemaVersion: 3,
-  generatedAt,
-  providers: [{
-    provider: "claude",
-    label: "Claude",
-    plan: "synthetic",
-    source: "oauth",
-    state: {
-      status: claudeStatus,
-      stale: false,
-      refreshedAt: claudeStatus === "fresh" ? generatedAt : null,
-      error: claudeError,
-    },
-    windows: claudeStatus === "fresh" ? [{
-      id: "five_hour",
-      label: "session",
-      kind: "session",
-      percentRemaining: state.percentRemaining,
-      resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-      windowSeconds: 18000,
-      pace: { status: "unknown" },
-    }, {
-      id: "seven_day",
-      label: "week",
-      kind: "weekly",
-      percentRemaining: 64,
-      resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-      windowSeconds: 604800,
-      pace: { status: "unknown" },
-    }, {
-      id: "model:fable",
-      label: "Fable week",
-      kind: "model",
-      percentRemaining: 71,
-      resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-      windowSeconds: 604800,
-      pace: { status: "unknown" },
-    }] : [],
-    quotaSemantics: {
+const claudeWindows = claudeStatus === "fresh" ? [{
+  id: "five_hour",
+  label: "session",
+  kind: "session",
+  percentRemaining: state.percentRemaining,
+  resetsAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+  pace: { status: "unknown" },
+}, {
+  id: "seven_day",
+  label: "week",
+  kind: "weekly",
+  percentRemaining: 64,
+  resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+  pace: { status: "unknown" },
+}, {
+  id: "model:fable",
+  label: "Fable week",
+  kind: "model",
+  percentRemaining: 71,
+  resetsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+  pace: { status: "unknown" },
+}] : [];
+const effectivePercentRemaining = Math.min(state.percentRemaining, 64);
+const limitingWindowIds = state.percentRemaining < 64
+  ? ["five_hour"]
+  : state.percentRemaining === 64
+    ? ["five_hour", "seven_day"]
+    : ["seven_day"];
+const claude = {
+  provider: "claude",
+  plan: "synthetic",
+  state: {
+    status: claudeStatus,
+    stale: false,
+    error: claudeError,
+  },
+  windows: claudeWindows,
+  quotaSemantics: claudeStatus === "fresh" ? {
+    status: "known",
+    effectiveAvailability: [{
+      scope: "all_models",
       status: "known",
-      effectiveAvailability: [{
-        scope: "all_models",
-        limitingWindowIds: ["seven_day"],
-      }],
-    },
-  }, {
-    provider: "codex",
-    label: "Codex",
-    plan: "synthetic",
-    source: "oauth",
-    state: { status: "fresh", stale: false, refreshedAt: generatedAt },
-    windows: [{
-      id: "weekly",
-      label: "week",
-      kind: "weekly",
-      percentRemaining: 61,
-      resetsAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-      windowSeconds: 604800,
-      pace: { status: "unknown" },
+      effectivePercentRemaining,
+      boundedBy: ["five_hour", "seven_day"],
+      limitingWindowIds,
+    }, {
+      scope: "model:fable",
+      status: "known",
+      effectivePercentRemaining,
+      boundedBy: ["five_hour", "seven_day", "model:fable"],
+      limitingWindowIds,
     }],
+  } : {
+    status: "unknown",
+    effectiveAvailability: [],
+  },
+};
+const codex = {
+  provider: "codex",
+  plan: "synthetic",
+  state: { status: "fresh", stale: false },
+  windows: [{
+    id: "weekly",
+    label: "week",
+    kind: "weekly",
+    percentRemaining: 61,
+    resetsAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+    pace: { status: "unknown" },
   }],
+  quotaSemantics: {
+    status: "known",
+    effectiveAvailability: [{
+      scope: "all_models",
+      status: "known",
+      effectivePercentRemaining: 61,
+      boundedBy: ["weekly"],
+      limitingWindowIds: ["weekly"],
+    }],
+  },
+};
+if (schemaVersion === 3) {
+  Object.assign(claude, { label: "Claude", source: "oauth" });
+  Object.assign(codex, { label: "Codex", source: "oauth" });
+  claude.state.refreshedAt = claudeStatus === "fresh" ? generatedAt : null;
+  codex.state.refreshedAt = generatedAt;
+  for (const window of [...claude.windows, ...codex.windows]) {
+    window.windowSeconds = window.kind === "session" ? 18000 : 604800;
+  }
+}
+console.log(JSON.stringify({
+  schemaVersion,
+  generatedAt,
+  providers: [claude, codex],
 }));
 `,
       { mode: 0o755 },

@@ -363,9 +363,9 @@ export class CrewdeckService {
   }
 
   private detectedProfiles(): DetectedProfile[] {
-    // quota-axi schema v3 does not expose a stable per-profile identifier on its
-    // safe --json surface. Inventing one would conflate accounts, so live mode
-    // reports detection as unsupported until the authoritative source adds it.
+    // Supported quota-axi schemas v3 and v5 do not expose a stable per-profile
+    // identifier on safe --json. Inventing one would conflate accounts, so live
+    // mode reports detection as unsupported until that contract adds one.
     return [];
   }
 
