@@ -469,7 +469,7 @@ function accountViews(now: number, scenario: DemoScenario): AccountView[] {
       plan: null,
       state: { status: "unsupported", refreshedAt: null },
       windows: [],
-      note: "unsupported quota source schema — expected version 3; no values inferred",
+      note: "unsupported quota source schema — expected version 3 or 5; no values inferred",
       queryError: null,
     },
   ];

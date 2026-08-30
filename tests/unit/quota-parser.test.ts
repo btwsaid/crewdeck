@@ -5,6 +5,7 @@ import {
   retainLastGoodClaude,
 } from "@/server/quota-parser";
 import { assertCleanPayload } from "@/server/safety";
+import schemaV5Fixture from "../fixtures/quota-schema-v5.json";
 
 const base = {
   schemaVersion: 3,
@@ -69,6 +70,101 @@ const base = {
   accounts: [{ nativeCredential: "excluded" }],
 };
 
+describe("quota schema v5", () => {
+  it("maps the authoritative default --json contract without inferring demoted fields", () => {
+    const result = parseQuotaPayload(schemaV5Fixture, 10);
+    const claude = result.providers[0];
+
+    expect(result).toMatchObject({
+      schemaVersion: 5,
+      source: {
+        status: "partial",
+        refreshedAt: Date.parse("2035-01-01T00:00:00.000Z"),
+      },
+    });
+    expect(claude).toMatchObject({
+      provider: "claude",
+      label: "Claude",
+      sourceKind: "not reported",
+      state: { status: "fresh", refreshedAt: null },
+      limitingWindowIds: ["seven_day"],
+    });
+    expect(claude.windows.map((window) => window.id)).toEqual([
+      "five_hour",
+      "seven_day",
+      "model:fable",
+    ]);
+    expect(claude.windows[0]).toMatchObject({
+      percentRemaining: 72,
+      resetsAt: Date.parse("2035-01-01T02:00:00.000Z"),
+      windowSeconds: null,
+      elapsedPercent: null,
+      pace: {
+        status: "behind",
+        burnMultiple: 0.6,
+        projectedExhaustedAt: null,
+      },
+    });
+    expect(result.providers[1]).toMatchObject({
+      provider: "codex",
+      label: "Codex",
+      state: { status: "auth_required", refreshedAt: null },
+      windows: [],
+      reason: "Synthetic Codex sign-in required",
+    });
+    expect(() => assertCleanPayload(result)).not.toThrow();
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:effectivePercentRemaining|reservePercentPoints|spendPriority|authStatus)/u,
+    );
+  });
+
+  it("keeps malformed schema-v5 evidence explicit and guesses no values", () => {
+    const result = parseQuotaPayload({
+      schemaVersion: 5,
+      generatedAt: "not-a-date",
+      providers: [
+        {
+          provider: "claude",
+          state: { status: "fresh", stale: false },
+          windows: [
+            null,
+            {
+              id: "five_hour",
+              label: "session",
+              kind: "session",
+              percentRemaining: 900,
+              resetsAt: "not-a-date",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.source).toMatchObject({
+      status: "partial",
+      refreshedAt: null,
+      reason: expect.stringMatching(/1 malformed window record/u),
+    });
+    expect(result.providers[0].windows[0]).toMatchObject({
+      percentRemaining: null,
+      resetsAt: null,
+      windowSeconds: null,
+    });
+  });
+
+  it("rejects a malformed root contract without treating it as an unknown version", () => {
+    const result = parseQuotaPayload({ schemaVersion: 5, providers: {} });
+    expect(result).toMatchObject({
+      schemaVersion: 5,
+      source: {
+        status: "error",
+        reason: "malformed quota source payload — providers must be an array",
+      },
+      providers: [],
+    });
+  });
+});
+
 describe("quota schema v3", () => {
   it("maps authoritative windows field-by-field, including Fable", () => {
     const result = parseQuotaPayload(base, 10);
@@ -90,11 +186,18 @@ describe("quota schema v3", () => {
     expect(JSON.stringify(result)).not.toContain("accounts");
   });
 
-  it("fails closed on unsupported schema versions", () => {
-    const result = parseQuotaPayload({ ...base, schemaVersion: 99 }, 10);
-    expect(result.source.status).toBe("unsupported");
-    expect(result.providers).toEqual([]);
-    expect(result.source.reason).toContain("expected version 3");
+  it("retains schema v3 and fails closed on missing or unknown schema versions", () => {
+    expect(parseQuotaPayload(base, 10).source.status).toBe("live");
+    for (const payload of [
+      { ...base, schemaVersion: 4 },
+      { ...base, schemaVersion: 99 },
+      { providers: base.providers },
+    ]) {
+      const result = parseQuotaPayload(payload, 10);
+      expect(result.source.status).toBe("unsupported");
+      expect(result.providers).toEqual([]);
+      expect(result.source.reason).toContain("expected version 3 or 5");
+    }
   });
 
   it("never substitutes parser or payload generation time for a missing successful evidence time", () => {

@@ -9,6 +9,8 @@ import type {
   QuotaState,
   QuotaWindow,
 } from "@/server/contracts";
+import { parseQuotaPayload } from "@/server/quota-parser";
+import schemaV5Fixture from "../fixtures/quota-schema-v5.json";
 
 const NOW = Date.parse("2035-01-01T00:04:00Z");
 
@@ -68,6 +70,28 @@ function snapshot(row: ProviderQuota): QuotaSnapshot {
 afterEach(cleanup);
 
 describe("quota evidence presentation", () => {
+  it("renders parsed schema-v5 facts and keeps its demoted evidence times explicit", () => {
+    render(
+      <Provisions quota={parseQuotaPayload(schemaV5Fixture, NOW)} now={NOW} />,
+    );
+
+    expect(
+      screen.getByRole("img", {
+        name: /Claude session: 72 percent remaining/u,
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("img", {
+        name: /Claude Fable week: 81 percent remaining/u,
+      }),
+    ).toBeTruthy();
+    expect(screen.getByText("Synthetic Codex sign-in required")).toBeTruthy();
+    expect(
+      screen.getAllByText("successful update time unavailable"),
+    ).toHaveLength(3);
+    expect(screen.queryByText(/unsupported quota source schema/u)).toBeNull();
+  });
+
   it("renders a supplied Claude window and marks a missing core window without inventing Fable", () => {
     render(
       <Provisions

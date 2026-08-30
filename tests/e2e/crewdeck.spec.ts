@@ -325,7 +325,7 @@ test("production live mode renders current Claude windows on an isolated loopbac
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "live-mode smoke runs once");
-  const fixture = await createSyntheticLiveFixture();
+  const fixture = await createSyntheticLiveFixture({ quotaSchemaVersion: 5 });
   const port = await isolatedPort();
   const origin = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["server.mjs"], {
@@ -361,13 +361,20 @@ test("production live mode renders current Claude windows on an isolated loopbac
         name: /Claude session: 71 percent remaining/u,
       }),
     ).toBeVisible();
+    const firstClaudeCard = page
+      .locator(".gauge-card")
+      .filter({ hasText: "Claude" })
+      .first();
     await expect(
-      page
-        .locator(".gauge-card")
-        .filter({ hasText: "Claude" })
-        .first()
-        .locator("time.evidence-time"),
-    ).toHaveAttribute("aria-label", /updated .*; absolute local time/u);
+      firstClaudeCard.locator(".evidence-time.missing"),
+    ).toHaveAttribute(
+      "aria-label",
+      /successful update time unavailable; no time was inferred/u,
+    );
+    await expect(firstClaudeCard.locator("time.evidence-time")).toHaveCount(0);
+    await expect(
+      page.getByText(/unsupported quota source schema/u),
+    ).toHaveCount(0);
     await expect(
       page.getByRole("img", { name: /Claude week: 64 percent remaining/u }),
     ).toBeVisible();
@@ -389,6 +396,8 @@ test("production live mode renders current Claude windows on an isolated loopbac
     const quota = await page.evaluate(async () => {
       const response = await fetch("/api/quota");
       return (await response.json()) as {
+        schemaVersion: number;
+        source: { status: string };
         providers: Array<{
           provider: string;
           windows: Array<{
@@ -398,6 +407,10 @@ test("production live mode renders current Claude windows on an isolated loopbac
           }>;
         }>;
       };
+    });
+    expect(quota).toMatchObject({
+      schemaVersion: 5,
+      source: { status: "live" },
     });
     const claude = quota.providers.find(
       (provider) => provider.provider === "claude",

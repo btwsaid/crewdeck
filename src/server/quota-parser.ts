@@ -14,6 +14,20 @@ import {
   safeTimestamp,
 } from "./safety";
 
+type SupportedQuotaSchema = 3 | 5;
+
+const supportedQuotaSchemas: SupportedQuotaSchema[] = [3, 5];
+const schemaV5ProviderLabels: Record<string, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  cursor: "Cursor",
+  copilot: "GitHub Copilot",
+  grok: "Grok",
+  kimi: "Kimi",
+  zai: "Z.AI",
+  agy: "Antigravity",
+};
+
 function paceState(value: unknown): PaceState {
   return value === "ahead" || value === "behind" || value === "on_pace"
     ? value
@@ -79,13 +93,19 @@ function mapWindow(value: unknown): QuotaWindow | null {
   };
 }
 
+interface MappedProvider {
+  provider: ProviderQuota;
+  malformedWindows: number;
+}
+
 function errorReason(
   state: Record<string, unknown>,
   status: QuotaState,
 ): string | null {
-  const raw = isRecord(state.error)
+  const sourceError = isRecord(state.error)
     ? (state.error.message ?? state.error.code)
-    : (state.error ?? state.authStatus);
+    : state.error;
+  const raw = sourceError ?? state.reason;
   const fallbacks: Record<QuotaState, string | null> = {
     fresh: null,
     stale: "last authoritative values are stale",
@@ -100,17 +120,25 @@ function errorReason(
     : safeNarrative(raw, fallbacks[status] ?? "quota source error", 180);
 }
 
-function mapProvider(value: unknown, now: number): ProviderQuota | null {
-  if (!isRecord(value)) return null;
-  const provider = safeIdentifier(value.provider, "");
-  if (!provider) return null;
-  const state = isRecord(value.state) ? value.state : {};
+function mapProvider(
+  value: unknown,
+  now: number,
+  schemaVersion: SupportedQuotaSchema,
+): MappedProvider | null {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.state) ||
+    !Array.isArray(value.windows)
+  )
+    return null;
+  const providerId = safeIdentifier(value.provider, "");
+  if (!providerId) return null;
+  const state = value.state;
   const status = quotaState(state.status, state.stale);
-  const windows = Array.isArray(value.windows)
-    ? value.windows
-        .map(mapWindow)
-        .filter((window): window is QuotaWindow => window !== null)
-    : [];
+  const mappedWindows = value.windows.map(mapWindow);
+  const windows = mappedWindows.filter(
+    (window): window is QuotaWindow => window !== null,
+  );
   const quotaSemantics = isRecord(value.quotaSemantics)
     ? value.quotaSemantics
     : {};
@@ -138,21 +166,36 @@ function mapProvider(value: unknown, now: number): ProviderQuota | null {
   const queryFailed =
     ["rate_limited", "unavailable", "error"].includes(status) ||
     (status === "stale" && state.error !== undefined);
+  const labelFallback =
+    schemaVersion === 5
+      ? (schemaV5ProviderLabels[providerId] ?? providerId)
+      : providerId;
   return {
-    provider,
-    label: safeDisplayToken(value.label, provider, 50),
-    accountAlias: null,
-    plan:
-      value.plan === null
-        ? null
-        : safeDisplayToken(value.plan, "not reported", 40),
-    sourceKind: safeDisplayToken(value.source, "unavailable", 40),
-    state: { status, refreshedAt: safeTimestamp(state.refreshedAt) },
-    windows,
-    reason,
-    queryError: queryFailed && reason ? { observedAt: now, reason } : null,
-    limitingWindowIds,
-    relationship: "unknown",
+    provider: {
+      provider: providerId,
+      label: safeDisplayToken(value.label, labelFallback, 50),
+      accountAlias: null,
+      plan:
+        value.plan === null
+          ? null
+          : safeDisplayToken(value.plan, "not reported", 40),
+      // Schema v5 intentionally demotes provenance from default --json. Keep
+      // that omission explicit instead of mislabeling a fresh source as down.
+      sourceKind: safeDisplayToken(
+        value.source,
+        schemaVersion === 5 ? "not reported" : "unavailable",
+        40,
+      ),
+      // Schema v5 also demotes provider refreshedAt. The report-level
+      // generatedAt must not be substituted for provider evidence time.
+      state: { status, refreshedAt: safeTimestamp(state.refreshedAt) },
+      windows,
+      reason,
+      queryError: queryFailed && reason ? { observedAt: now, reason } : null,
+      limitingWindowIds,
+      relationship: "unknown",
+    },
+    malformedWindows: mappedWindows.length - windows.length,
   };
 }
 
@@ -160,28 +203,64 @@ export function parseQuotaPayload(
   raw: unknown,
   now = Date.now(),
 ): QuotaSnapshot {
-  if (!isRecord(raw) || raw.schemaVersion !== 3) {
-    const received =
-      isRecord(raw) && typeof raw.schemaVersion === "number"
-        ? raw.schemaVersion
-        : null;
+  const received =
+    isRecord(raw) && typeof raw.schemaVersion === "number"
+      ? raw.schemaVersion
+      : null;
+  if (
+    !isRecord(raw) ||
+    !supportedQuotaSchemas.includes(received as SupportedQuotaSchema)
+  ) {
     return {
       generatedAt: now,
       schemaVersion: received,
       source: {
         status: "unsupported",
         refreshedAt: null,
-        reason: `unsupported quota source schema — expected version 3${received === null ? "" : `, received ${received}`}`,
+        reason: `unsupported quota source schema — expected version 3 or 5${received === null ? "" : `, received ${received}`}`,
       },
       providers: [],
     };
   }
 
-  const providers = Array.isArray(raw.providers)
-    ? raw.providers
-        .map((provider) => mapProvider(provider, now))
-        .filter((provider): provider is ProviderQuota => provider !== null)
-    : [];
+  const schemaVersion = received as SupportedQuotaSchema;
+  if (!Array.isArray(raw.providers)) {
+    return {
+      generatedAt: now,
+      schemaVersion,
+      source: {
+        status: "error",
+        refreshedAt: safeTimestamp(raw.generatedAt),
+        reason: "malformed quota source payload — providers must be an array",
+      },
+      providers: [],
+    };
+  }
+
+  const mappedProviders = raw.providers.map((provider) =>
+    mapProvider(provider, now, schemaVersion),
+  );
+  const providers = mappedProviders
+    .filter((provider): provider is MappedProvider => provider !== null)
+    .map((provider) => provider.provider);
+  const malformedProviders = mappedProviders.length - providers.length;
+  const malformedWindows = mappedProviders.reduce(
+    (total, provider) => total + (provider?.malformedWindows ?? 0),
+    0,
+  );
+  const malformedParts = [
+    malformedProviders > 0
+      ? `${malformedProviders} malformed provider record${malformedProviders === 1 ? "" : "s"}`
+      : null,
+    malformedWindows > 0
+      ? `${malformedWindows} malformed window record${malformedWindows === 1 ? "" : "s"}`
+      : null,
+  ].filter((part): part is string => part !== null);
+  const malformedReason =
+    malformedParts.length > 0
+      ? `quota source payload contained ${malformedParts.join(" and ")}`
+      : null;
+
   // generatedAt is source evidence only when the source actually supplies it;
   // a parser or poll time must never make allowance evidence look refreshed.
   const refreshedAt = safeTimestamp(raw.generatedAt);
@@ -193,22 +272,31 @@ export function parseQuotaPayload(
   const sourceStatus =
     providers.length === 0 || successful === 0
       ? "error"
-      : failures.length > 0
+      : failures.length > 0 || malformedReason !== null
         ? "partial"
         : stale
           ? "stale"
           : "live";
+  const reportingReason = `${successful} of ${raw.providers.length} providers reporting`;
   return {
     generatedAt: now,
-    schemaVersion: 3,
+    schemaVersion,
     source: {
       status: sourceStatus,
       refreshedAt,
       reason:
         sourceStatus === "partial"
-          ? `${successful} of ${providers.length} providers reporting`
+          ? [
+              reportingReason,
+              stale ? "authoritative quota values are stale" : null,
+              malformedReason,
+            ]
+              .filter((part): part is string => part !== null)
+              .join("; ")
           : sourceStatus === "error"
-            ? "no authoritative quota provider is reporting"
+            ? ["no authoritative quota provider is reporting", malformedReason]
+                .filter((part): part is string => part !== null)
+                .join("; ")
             : stale
               ? "authoritative quota values are stale"
               : null,
